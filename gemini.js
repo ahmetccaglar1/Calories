@@ -27,14 +27,15 @@ const geminiSchema = (s) => {
   return schemaCache.get(s);
 };
 
-async function apiError(res) {
+async function apiError(res, model) {
   let msg = "";
   try { msg = (await res.json())?.error?.message ?? ""; } catch {}
+  console.warn("Gemini hatası", res.status, model, msg);
   if (/leaked/i.test(msg)) return new AiError("Bu Gemini anahtarı sızdırılmış olarak işaretlenmiş. AI Studio'dan yeni anahtar oluştur.");
   if (res.status === 400 && /api key/i.test(msg)) return new AiError("Gemini API anahtarı geçersiz. Ayarlardan kontrol et.");
   if (res.status === 403) return new AiError("Bu anahtarın Gemini API'ye erişim izni yok. AI Studio'dan yeni anahtar oluştur.");
   if (res.status === 429) return new AiError("Ücretsiz kullanım kotası doldu. Biraz bekleyip (veya yarın) tekrar dene.");
-  if (res.status >= 500) return new AiError("Gemini şu an yanıt vermiyor. Biraz sonra tekrar dene.");
+  if (res.status >= 500) return new AiError(`Gemini şu an yanıt vermiyor (${res.status}${msg ? `: ${msg.slice(0, 140)}` : ""}). Birkaç dakika sonra tekrar dene; olmazsa Profil'den öğün analizini "Daha doğru (Flash)" yap.`);
   return new AiError(`Gemini hatası (${res.status}): ${msg || res.statusText}`);
 }
 
@@ -81,31 +82,57 @@ export const userTurn = ({ text, images }) => ({
   parts: [...images.map((data) => ({ inlineData: { mimeType: "image/jpeg", data } })), { text }],
 });
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isServerError = (res) => res.status >= 500 && res.status < 600;
+
+/** Bu seviyenin model adını döndürür; ad kalkmışsa (404) erişilebilir modellerden seçip hatırlar. */
+async function resolveModel(apiKey, tier, request) {
+  let t = TIERS[tier] ?? TIERS.standard;
+  const model = localStorage.getItem(t.ls) || t.alias;
+  const res = await request(model);
+  if (res.status !== 404) return { model, res };
+  let picked = await pickModel(apiKey, tier);
+  if (!picked && tier !== "standard") { t = TIERS.standard; picked = localStorage.getItem(t.ls) || await pickModel(apiKey, "standard"); }
+  if (!picked) throw new AiError("Uygun Gemini modeli bulunamadı.");
+  localStorage.setItem(t.ls, picked);
+  return { model: picked, res: await request(picked) };
+}
+
 export async function complete({ apiKey, system, turns, schema, tier = "standard", onText }) {
   const method = onText ? "streamGenerateContent?alt=sse" : "generateContent";
-  const request = (model) => fetch(`${BASE}/models/${model}:${method}`, {
+  // strict=false: şema zorlaması olmadan JSON modu (bazı şemalarda Gemini 500 dönebiliyor); şema talimata eklenir
+  const request = (model, strict = true) => fetch(`${BASE}/models/${model}:${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
+      systemInstruction: { parts: [{ text: strict ? system : `${system}\n\nYanıtı yalnızca şu JSON şemasına uyan tek bir JSON nesnesi olarak ver:\n${JSON.stringify(schema)}` }] },
       contents: turns,
-      generationConfig: { responseMimeType: "application/json", responseSchema: geminiSchema(schema) },
+      generationConfig: strict
+        ? { responseMimeType: "application/json", responseSchema: geminiSchema(schema) }
+        : { responseMimeType: "application/json" },
     }),
   });
 
   let data;
   try {
-    let t = TIERS[tier] ?? TIERS.standard;
-    let res = await request(localStorage.getItem(t.ls) || t.alias);
-    if (res.status === 404) {
-      // Model adı kalkmış/değişmiş olabilir: erişilebilir modellerden seç ve hatırla.
-      let model = await pickModel(apiKey, tier);
-      if (!model && tier !== "standard") { t = TIERS.standard; model = localStorage.getItem(t.ls) || await pickModel(apiKey, "standard"); }
-      if (!model) throw new AiError("Uygun Gemini modeli bulunamadı.");
-      localStorage.setItem(t.ls, model);
+    let { model, res } = await resolveModel(apiKey, tier, request);
+    // Sunucu hatası (500/503 "aşırı yüklü" vb.): kısa beklemeyle iki kez tekrar dene
+    for (const wait of [1200, 3000]) {
+      if (!isServerError(res)) break;
+      await sleep(wait);
       res = await request(model);
     }
-    if (!res.ok) throw await apiError(res);
+    // Hâlâ olmuyorsa diğer modeli dene (Flash-Lite ↔ Flash)
+    if (isServerError(res)) {
+      const other = tier === "lite" ? "standard" : "lite";
+      try {
+        const alt = await resolveModel(apiKey, other, request);
+        if (alt.res.ok || !isServerError(alt.res)) ({ model, res } = alt);
+      } catch {}
+    }
+    // Son çare: şema zorlaması olmadan
+    if (isServerError(res)) res = await request(model, false);
+    if (!res.ok) throw await apiError(res, model);
     data = onText ? await readStream(res, onText) : await res.json();
   } catch (err) {
     if (err instanceof AiError) throw err;

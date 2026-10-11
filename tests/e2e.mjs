@@ -259,6 +259,42 @@ try {
   ok(await p2.evaluate(() => localStorage.getItem("kalori.meals") === null), "eski localStorage kaydı temizleniyor");
   await ctx2.close();
 
+  // ================= Gemini sunucu hataları =================
+  async function analyzeWith(handler) {
+    const c = await browser.newContext(mobile);
+    await setupRoutes(c);
+    const calls = [];
+    // Sonradan eklenen route önceliklidir; eşleşmeyen istekler genel taklide düşer
+    await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      const url = route.request().url();
+      const body = JSON.parse(route.request().postData() || "{}");
+      calls.push({ model: url.match(/models\/([^:]+)/)?.[1], strict: !!body.generationConfig?.responseSchema });
+      return handler(route, calls.at(-1)) ?? route.fallback();
+    });
+    await c.addInitScript(() => localStorage.setItem("kalori.settings", JSON.stringify({ onboarded: true, geminiKey: "AIzaX", dataVersion: 2 })));
+    const p = await newPage(c);
+    await p.goto(BASE);
+    await p.click("#addBtn");
+    await p.click("#textMealBtn");
+    await p.fill("#mealNote", "menemen");
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector("#kcalEdit, #analysisArea .error", { timeout: 20000 });
+    const result = { calls, error: await p.$eval("#analysisArea", (el) => el.querySelector(".error")?.textContent ?? "") };
+    await c.close();
+    return result;
+  }
+  const fail = (status, message) => (route) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: { message } }) });
+
+  let r = await analyzeWith((route, call) => (call.model.includes("lite") ? fail(503, "The model is overloaded.")(route) : null));
+  ok(!r.error && r.calls.filter((c) => c.model.includes("lite")).length === 3 && r.calls.some((c) => !c.model.includes("lite")),
+    "Flash-Lite aşırı yüklüyse iki kez tekrar deneyip Flash'a geçiyor");
+
+  r = await analyzeWith((route, call) => (call.strict ? fail(500, "Internal error encountered.")(route) : null));
+  ok(!r.error && r.calls.at(-1).strict === false, "şemalı istek 500 veriyorsa şemasız JSON moduyla tamamlanıyor");
+
+  r = await analyzeWith(fail(503, "The model is overloaded. Please try again later."));
+  ok(r.error.includes("503") && r.error.includes("overloaded"), `her şey çökükse gerçek hata gösteriliyor ("${r.error.slice(0, 70)}…")`);
+
   ok(errors.length === 0, `sayfa hatası yok${errors.length ? ": " + errors.join(" | ") : ""}`);
 } catch (err) {
   console.error(err);
