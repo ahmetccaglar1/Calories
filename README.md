@@ -1,12 +1,13 @@
 # Kalori Günlüğü (PWA)
 
-Yediğin yemeğin fotoğrafını çek → Claude yemeği tanır, porsiyonu ve kaloriyi tahmin eder →
+Yediğin yemeğin fotoğrafını çek → yapay zeka yemeği tanır, porsiyonu ve kaloriyi tahmin eder →
 gerekirse "nasıl pişti, ne kadar yağ kondu, hepsini yedin mi?" gibi sorular sorar → cevaplarına göre
 tahmini günceller ve günlük loga ekler. Günlük kalori hedefine ulaştığında **"Bugünlük yemek bitti"** uyarısı verir.
 
 ## Özellikler
 - 📷 Fotoğrafla veya ✍︎ yazarak öğün ekleme
-- 🤖 Claude (`claude-opus-5-5`) ile görüntü analizi, kalem kalem kcal / protein / karbonhidrat / yağ
+- 🤖 Google Gemini (ücretsiz kota) ile görüntü analizi, kalem kalem kcal / protein / karbonhidrat / yağ.
+  İstenirse ayarlardan ücretli Anthropic Claude'a geçilebilir.
 - ❓ Belirsizlikler için hazır cevaplı takip soruları (pişirme yöntemi, yağ miktarı, porsiyon…)
 - ✏️ Kaydetmeden önce toplam kaloriyi elle düzeltebilme
 - 🎯 Günlük hedef + hedef hesaplayıcı (Mifflin-St Jeor + seçilen kalori açığı)
@@ -22,14 +23,19 @@ Birkaç dakika sonra `https://<kullanıcı>.github.io/Calories/` adresinde açı
 
 **iPhone'a kurma:** Safari'de adresi aç → Paylaş → *Ana Ekrana Ekle*.
 
-**API anahtarı:** [console.anthropic.com](https://console.anthropic.com) → API Keys. Uygulama ilk açılışta
-ayarlarda ister. Anahtar sadece cihazında saklanır ve istekler doğrudan `api.anthropic.com`'a gider —
-bu yüzden uygulamayı kişisel kullanım için düşün, anahtarını kimseyle paylaşma ve konsoldan harcama limiti koy.
+**Ücretsiz API anahtarı (Gemini):** [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → Google hesabınla gir →
+*Create API key* → kopyala. Uygulama ilk açılışta ayarlarda ister. Kredi kartı gerekmez; ücretsiz kotada
+Google gönderilen verileri ürünlerini geliştirmek için kullanabilir.
+
+Anahtar koda gömülmez, sadece telefonunda saklanır ve istekler doğrudan Google'a (veya Claude seçiliyse
+Anthropic'e) gider. Repo ve site herkese açık olduğu için anahtarı asla repoya koyma.
 
 **Yerelde çalıştırma:** `python3 -m http.server 8000` → http://localhost:8000
 
 ## Dosyalar
 - `index.html`, `styles.css` — arayüz
 - `app.js` — günlük log, hedef, uyarılar, fotoğraf işleme
-- `ai.js` — Claude çağrısı (JSON şemalı yapılandırılmış çıktı, çok turlu soru-cevap)
+- `prompt.js` — ortak talimat ve JSON çıktı şeması
+- `gemini.js` — Gemini çağrısı (varsayılan; model adı kalkarsa uygun Flash modelini kendisi seçer)
+- `claude.js` — Claude çağrısı (isteğe bağlı)
 - `sw.js`, `manifest.json`, `icons/` — PWA
