@@ -1,41 +1,17 @@
-import { AiError } from "./prompt.js";
+// Ana ekran: günlük özet, makrolar, öğün listesi ve fotoğraf/yazı ile öğün ekleme akışı.
+import { $, esc, fmt, setButtons, loadingHtml, loadImage, resize, squareThumb } from "./util.js";
+import { settings, activeKey, dayKey, mealsFor, totalsFor, macroTargets, addMeal, deleteMeal } from "./store.js";
+import { Chat } from "./ai.js";
+import { mealSystem, MEAL_SCHEMA, normalizeMeal, mealFirstPrompt, mealAnswersPrompt, profileContext } from "./prompt.js";
+import { initSettings, openSettings, settingsOpen } from "./settings.js";
+import { openSuggest, suggestOpen, remaining } from "./suggest.js";
+import { initAutoUpdate, initPullToRefresh } from "./update.js";
 
-// ---------- Storage ----------
-const LS_MEALS = "kalori.meals";
-const LS_SETTINGS = "kalori.settings";
-
-const load = (key, fallback) => {
-  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
-};
-const save = (key, value) => {
-  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
-  catch { alert("Depolama dolu. Eski verileri dışa aktarıp silmeyi dene."); return false; }
-};
-
-let meals = load(LS_MEALS, []);
-let settings = { goal: 2000, provider: "gemini", geminiKey: "", claudeKey: "", ...load(LS_SETTINGS, {}) };
-if (settings.apiKey) { settings.claudeKey ||= settings.apiKey; delete settings.apiKey; } // eski sürümden taşı
-const activeKey = () => (settings.provider === "claude" ? settings.claudeKey : settings.geminiKey);
-
-const dayKey = (d) => {
-  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return z.toISOString().slice(0, 10);
-};
-let currentDay = dayKey(new Date());
-
-const mealsFor = (day) => meals.filter((m) => m.date === day).sort((a, b) => a.time.localeCompare(b.time));
-const totalsFor = (day) => mealsFor(day).reduce(
-  (t, m) => ({ kcal: t.kcal + m.kcal, protein: t.protein + m.protein, carbs: t.carbs + m.carbs, fat: t.fat + m.fat }),
-  { kcal: 0, protein: 0, carbs: 0, fat: 0 },
-);
-
-// ---------- DOM ----------
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const fmt = (n) => Math.round(n).toLocaleString("tr-TR");
-
+let currentDay = dayKey();
 const RING_LEN = 2 * Math.PI * 52;
 $("ringFg").style.strokeDasharray = RING_LEN;
+
+// ---------- Özet ----------
 
 function statusFor(eaten, goal) {
   const left = goal - eaten;
@@ -46,8 +22,15 @@ function statusFor(eaten, goal) {
   return { level: "ok", text: "" };
 }
 
+const MACROS = [
+  { key: "protein", label: "Protein", color: "var(--protein)" },
+  { key: "carbs", label: "Karbonhidrat", color: "var(--carbs)" },
+  { key: "fat", label: "Yağ", color: "var(--fat)" },
+  { key: "fiber", label: "Lif", color: "var(--fiber)" },
+];
+
 function render() {
-  const today = dayKey(new Date());
+  const today = dayKey();
   const d = new Date(currentDay + "T12:00:00");
   $("dayTitle").textContent = currentDay === today ? "Bugün"
     : d.toLocaleDateString("tr-TR", { weekday: "short", day: "numeric", month: "long" });
@@ -55,12 +38,13 @@ function render() {
 
   const t = totalsFor(currentDay);
   const goal = settings.goal;
+  const targets = macroTargets();
   $("eaten").textContent = fmt(t.kcal);
   $("target").textContent = fmt(goal);
-  $("remaining").textContent = `${fmt(goal - t.kcal)} kcal`;
-  $("protein").textContent = `${fmt(t.protein)} g`;
-  $("carbs").textContent = `${fmt(t.carbs)} g`;
-  $("fat").textContent = `${fmt(t.fat)} g`;
+  const left = goal - t.kcal;
+  $("remaining").textContent = left >= 0 ? `${fmt(left)} kcal` : `+${fmt(-left)} kcal`;
+  $("remaining").classList.toggle("over", left < 0);
+  $("extraStats").textContent = t.sugar ? `Şeker ${fmt(t.sugar)} g` : "";
 
   const st = statusFor(t.kcal, goal);
   const ring = $("ringFg");
@@ -68,34 +52,58 @@ function render() {
   ring.classList.toggle("warn", st.level === "warn");
   ring.classList.toggle("stop", st.level === "stop");
 
+  $("macros").innerHTML = MACROS.map((m) => {
+    const eaten = t[m.key];
+    const target = targets[m.key] || 0;
+    const pct = target ? Math.min(100, (eaten / target) * 100) : 0;
+    const over = target && eaten > target * 1.05 && m.key !== "protein" && m.key !== "fiber";
+    return `
+      <div class="macro">
+        <div class="macro-head"><span>${m.label}</span><span class="${over ? "over" : ""}">${fmt(eaten)} / ${fmt(target)} g</span></div>
+        <div class="bar"><div style="width:${pct}%;background:${over ? "var(--stop)" : m.color}"></div></div>
+      </div>`;
+  }).join("");
+
   const banner = $("banner");
   banner.className = `banner ${st.level}`;
   banner.textContent = st.text;
   banner.classList.toggle("hidden", !st.text);
 
+  const r = remaining(currentDay);
+  $("suggestHint").textContent = r.kcal >= 80
+    ? `${fmt(r.kcal)} kcal ve ${fmt(Math.max(0, r.protein))} g protein kaldı, sana uygun yemek ve tarif önereyim`
+    : "Bugünlük kalori hakkın bitti";
+
   const list = mealsFor(currentDay);
   $("emptyMeals").classList.toggle("hidden", list.length > 0);
   $("meals").innerHTML = list.map((m) => `
-    <li class="meal">
-      ${m.thumb ? `<img src="${m.thumb}" alt="">` : `<div class="ph">🍽️</div>`}
-      <div class="info">
-        <div class="name">${esc(m.name)}</div>
-        <div class="meta">${esc(m.time)} · P ${fmt(m.protein)} · K ${fmt(m.carbs)} · Y ${fmt(m.fat)}</div>
+    <li class="meal" data-id="${m.id}">
+      <div class="meal-row">
+        ${m.thumb ? `<img src="${m.thumb}" alt="">` : `<div class="ph">🍽️</div>`}
+        <div class="info">
+          <div class="name">${esc(m.name)}</div>
+          <div class="meta">${esc(m.time)} · P ${fmt(m.protein)} · K ${fmt(m.carbs)} · Y ${fmt(m.fat)}</div>
+        </div>
+        <div class="kcal">${fmt(m.kcal)} kcal</div>
       </div>
-      <div class="kcal">${fmt(m.kcal)} kcal</div>
-      <button data-del="${m.id}" aria-label="Sil">🗑</button>
+      <div class="meal-detail hidden">
+        ${m.items?.length ? `<table>${m.items.map((i) => `<tr><td>${esc(i.name)} <span class="hint">${esc(i.portion)}</span></td><td>${fmt(i.kcal)} kcal</td></tr>`).join("")}</table>` : ""}
+        <div class="hint">Lif ${fmt(m.fiber)} g · Şeker ${fmt(m.sugar)} g</div>
+        ${m.healthNote ? `<div class="health-note">🩺 ${esc(m.healthNote)}</div>` : ""}
+        ${m.note ? `<div class="hint">Not: ${esc(m.note)}</div>` : ""}
+        <button type="button" class="btn ghost small" data-del="${m.id}">🗑 Sil</button>
+      </div>
     </li>`).join("");
 }
 
 $("meals").addEventListener("click", (e) => {
-  const id = e.target.closest("[data-del]")?.dataset.del;
-  if (!id) return;
-  const m = meals.find((x) => x.id === id);
-  if (m && confirm(`"${m.name}" silinsin mi?`)) {
-    meals = meals.filter((x) => x.id !== id);
-    save(LS_MEALS, meals);
-    render();
+  const del = e.target.closest("[data-del]")?.dataset.del;
+  if (del) {
+    const m = mealsFor(currentDay).find((x) => x.id === del);
+    if (m && confirm(`"${m.name}" silinsin mi?`)) { deleteMeal(del); render(); }
+    return;
   }
+  e.target.closest(".meal")?.querySelector(".meal-detail").classList.toggle("hidden");
 });
 
 const shiftDay = (n) => {
@@ -106,40 +114,15 @@ const shiftDay = (n) => {
 };
 $("prevDay").onclick = () => shiftDay(-1);
 $("nextDay").onclick = () => shiftDay(1);
+$("ringBtn").onclick = () => openSettings("goals");
+$("suggestBtn").onclick = () => { if (ensureKey()) openSuggest(currentDay, afterAdd); };
 
-// ---------- Images ----------
-async function loadImage(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    return img;
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-}
-function resize(img, max, quality) {
-  const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-  const c = document.createElement("canvas");
-  c.width = Math.round(img.naturalWidth * scale);
-  c.height = Math.round(img.naturalHeight * scale);
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL("image/jpeg", quality);
-}
-function squareThumb(img, size) {
-  const s = Math.min(img.naturalWidth, img.naturalHeight);
-  const c = document.createElement("canvas");
-  c.width = c.height = size;
-  c.getContext("2d").drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, size, size);
-  return c.toDataURL("image/jpeg", 0.7);
-}
+// ---------- Öğün analizi ----------
 
-// ---------- Analysis flow ----------
 const dlg = $("analyzeDialog");
 const area = $("analysisArea");
 const actions = $("analyzeActions");
-let session = null; // { analysis, imageB64, thumb, result }
+let session = null; // { chat, imageB64, thumb, result }
 
 function ensureKey() {
   if (activeKey()) return true;
@@ -154,77 +137,63 @@ function confirmIfDone() {
   return confirm(`🛑 Bugünlük hedefine ulaştın (${fmt(t.kcal)} / ${fmt(settings.goal)} kcal).\nYine de bu öğünü kaydetmek istiyor musun?`);
 }
 
-async function newAnalysis() {
-  const mod = settings.provider === "claude" ? await import("./claude.js") : await import("./gemini.js");
-  return new mod.MealAnalysis(activeKey());
-}
-
 function openAnalysis({ imageB64 = null, thumb = null, preview = null }) {
-  session = { analysis: null, imageB64, thumb, result: null };
+  session = {
+    chat: new Chat({ system: mealSystem(profileContext(settings, macroTargets())), schema: MEAL_SCHEMA, normalize: normalizeMeal }),
+    imageB64, thumb, result: null,
+  };
   $("mealNote").value = "";
   $("previewImg").classList.toggle("hidden", !preview);
   if (preview) $("previewImg").src = preview;
   area.innerHTML = imageB64 ? "" : `<p class="hint">Ne yediğini yaz: örn. "2 yumurtalı menemen, 1 dilim beyaz ekmek, şekersiz çay"</p>`;
-  setActions([{ label: "Analiz et", onClick: runStart }]);
+  setButtons(actions, [{ label: "Analiz et", onClick: runStart }]);
   dlg.showModal();
   if (!imageB64) $("mealNote").focus();
 }
-
-function setActions(btns) {
-  actions.innerHTML = "";
-  for (const b of btns) {
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = `btn ${b.cls ?? ""}`;
-    el.textContent = b.label;
-    el.onclick = b.onClick;
-    actions.append(el);
-  }
-}
-
-function showLoading(text) {
-  area.innerHTML = `<div class="loading"><div class="spinner"></div>${esc(text)}</div>`;
-  setActions([]);
-}
+dlg.addEventListener("close", () => { session = null; });
 
 function showError(msg, retry) {
   area.innerHTML = `<div class="error">${esc(msg)}</div>`;
-  setActions([{ label: "Tekrar dene", onClick: retry }]);
+  setButtons(actions, [{ label: "Tekrar dene", onClick: retry }]);
 }
 
 async function runStart() {
   const note = $("mealNote").value.trim();
   if (!session.imageB64 && !note) { $("mealNote").focus(); return; }
-  showLoading("Yemeğini inceliyorum…");
+  area.innerHTML = loadingHtml("Yemeğini inceliyorum…");
+  setButtons(actions, []);
   const t = totalsFor(currentDay);
-  const context = `kullanıcının günlük hedefi ${settings.goal} kcal, bugün şu ana kadar ${Math.round(t.kcal)} kcal yedi`;
+  const today = `bugün şu ana kadar ${Math.round(t.kcal)} kcal, ${Math.round(t.protein)} g protein, ${Math.round(t.carbs)} g karbonhidrat yedi`;
   try {
-    session.analysis ??= await newAnalysis();
-    session.result = await session.analysis.start({ imageBase64: session.imageB64, note, context });
+    session.result = await session.chat.send({
+      text: mealFirstPrompt({ hasImage: !!session.imageB64, note, today }),
+      images: session.imageB64 ? [session.imageB64] : [],
+    });
     showResult();
   } catch (err) {
-    showError(err instanceof AiError ? err.message : `Beklenmeyen hata: ${err.message}`, runStart);
+    if (session) showError(err.message, runStart);
   }
 }
 
 async function runAnswers(answers) {
-  showLoading("Cevaplarına göre hesaplıyorum…");
+  area.innerHTML = loadingHtml("Cevaplarına göre hesaplıyorum…");
+  setButtons(actions, []);
   try {
-    session.result = await session.analysis.answer(answers);
+    session.result = await session.chat.send({ text: mealAnswersPrompt(answers) });
     showResult();
   } catch (err) {
-    showError(err instanceof AiError ? err.message : `Beklenmeyen hata: ${err.message}`, () => runAnswers(answers));
+    if (session) showError(err.message, () => runAnswers(answers));
   }
 }
 
 const CONF = { low: "Düşük güven", medium: "Orta güven", high: "Yüksek güven" };
 
 function showResult() {
+  if (!session) return;
   const r = session.result;
-  const t = totalsFor(currentDay);
-  const after = t.kcal + r.total.kcal;
+  const after = totalsFor(currentDay).kcal + r.total.kcal;
   const st = statusFor(after, settings.goal);
-  const questions = r.questions ?? [];
+  const questions = r.questions;
 
   area.innerHTML = `
     <div class="result">
@@ -232,7 +201,8 @@ function showResult() {
       <table>${r.items.map((i) => `<tr><td>${esc(i.name)} <span class="hint">${esc(i.portion)}</span></td><td>${fmt(i.kcal)} kcal</td></tr>`).join("")}</table>
       <div class="kcal-edit"><strong>Toplam</strong>
         <input type="number" id="kcalEdit" value="${Math.round(r.total.kcal)}" inputmode="numeric"> kcal</div>
-      <div class="hint">P ${fmt(r.total.protein_g)} g · K ${fmt(r.total.carbs_g)} g · Y ${fmt(r.total.fat_g)} g</div>
+      <div class="hint">P ${fmt(r.total.protein_g)} g · K ${fmt(r.total.carbs_g)} g · Y ${fmt(r.total.fat_g)} g · Lif ${fmt(r.total.fiber_g)} g · Şeker ${fmt(r.total.sugar_g)} g</div>
+      ${r.health_note ? `<div class="health-note">🩺 ${esc(r.health_note)}</div>` : ""}
       ${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}
     </div>
     ${questions.length ? `<p class="hint">Daha doğru hesaplamak için birkaç soru:</p>` : ""}
@@ -255,25 +225,22 @@ function showResult() {
     });
   });
 
-  const btns = [];
   if (questions.length) {
-    btns.push({
-      label: "Cevapla ve güncelle",
-      onClick: () => {
-        const answers = questions.map((q, qi) => {
+    setButtons(actions, [
+      {
+        label: "Cevapla ve güncelle",
+        onClick: () => runAnswers(questions.map((q, qi) => {
           const qEl = area.querySelector(`[data-q="${qi}"]`);
           const chip = qEl.querySelector(".chip.on")?.textContent ?? "";
           const free = qEl.querySelector(".qfree").value.trim();
           return { question: q.question, answer: [chip, free].filter(Boolean).join(", ") };
-        });
-        runAnswers(answers);
+        })),
       },
-    });
-    btns.push({ label: "Soruları geç, kaydet", cls: "ghost", onClick: saveMeal });
+      { label: "Soruları geç, kaydet", cls: "ghost", onClick: saveMeal },
+    ]);
   } else {
-    btns.push({ label: "Kaydet", onClick: saveMeal });
+    setButtons(actions, [{ label: "Kaydet", onClick: saveMeal }]);
   }
-  setActions(btns);
 }
 
 function saveMeal() {
@@ -282,8 +249,7 @@ function saveMeal() {
   const kcal = Number.isFinite(edited) && edited >= 0 ? edited : r.total.kcal;
   const ratio = r.total.kcal > 0 ? kcal / r.total.kcal : 1; // kullanıcı kaloriyi düzelttiyse makroları orantıla
   const now = new Date();
-  const before = totalsFor(currentDay).kcal;
-  meals.push({
+  const ok = addMeal({
     id: crypto.randomUUID(),
     date: currentDay,
     time: currentDay === dayKey(now) ? now.toTimeString().slice(0, 5) : "—",
@@ -292,16 +258,23 @@ function saveMeal() {
     protein: r.total.protein_g * ratio,
     carbs: r.total.carbs_g * ratio,
     fat: r.total.fat_g * ratio,
+    fiber: r.total.fiber_g * ratio,
+    sugar: r.total.sugar_g * ratio,
     items: r.items,
     note: $("mealNote").value.trim(),
+    healthNote: r.health_note,
     thumb: session.thumb,
   });
-  if (!save(LS_MEALS, meals)) { meals.pop(); return; }
+  if (!ok) return;
   dlg.close();
-  session = null;
-  render();
+  afterAdd(kcal);
+}
 
-  const after = before + kcal;
+/** Öğün eklendikten sonra: ekranı yenile, hedefe ulaşıldıysa uyar. */
+function afterAdd(addedKcal) {
+  render();
+  const after = totalsFor(currentDay).kcal;
+  const before = after - addedKcal;
   if (before < settings.goal && after >= settings.goal) {
     navigator.vibrate?.([200, 100, 200]);
     setTimeout(() => alert(statusFor(after, settings.goal).text), 50);
@@ -309,7 +282,7 @@ function saveMeal() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-$("photoInput").addEventListener("change", async (e) => {
+async function onPhoto(e) {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file || !ensureKey() || !confirmIfDone()) return;
@@ -320,80 +293,24 @@ $("photoInput").addEventListener("change", async (e) => {
   } catch {
     alert("Fotoğraf açılamadı.");
   }
-});
+}
+$("cameraInput").addEventListener("change", onPhoto);
+$("galleryInput").addEventListener("change", onPhoto);
 $("textMealBtn").onclick = () => { if (ensureKey() && confirmIfDone()) openAnalysis({}); };
 
-// ---------- Settings ----------
-const sDlg = $("settingsDialog");
-function openSettings() {
-  $("goalInput").value = settings.goal;
-  $("providerInput").value = settings.provider;
-  $("geminiKeyInput").value = settings.geminiKey;
-  $("claudeKeyInput").value = settings.claudeKey;
-  syncProviderFields();
-  $("calcResult").textContent = "";
-  sDlg.showModal();
-}
-function syncProviderFields() {
-  document.querySelectorAll("[data-provider]").forEach((el) => {
-    el.classList.toggle("hidden", el.dataset.provider !== $("providerInput").value);
-  });
-}
-$("providerInput").onchange = syncProviderFields;
-$("openSettings").onclick = openSettings;
-$("settingsForm").addEventListener("submit", (e) => {
-  if (e.submitter?.value !== "save") return;
-  settings.goal = Number($("goalInput").value) || settings.goal;
-  settings.provider = $("providerInput").value;
-  settings.geminiKey = $("geminiKeyInput").value.trim();
-  settings.claudeKey = $("claudeKeyInput").value.trim();
-  save(LS_SETTINGS, settings);
-  render();
-});
+// ---------- Başlangıç ----------
 
-$("calcBtn").onclick = () => {
-  // Mifflin-St Jeor
-  const w = +$("cWeight").value, h = +$("cHeight").value, a = +$("cAge").value;
-  const bmr = 10 * w + 6.25 * h - 5 * a + ($("cSex").value === "m" ? 5 : -161);
-  const tdee = bmr * +$("cAct").value;
-  const floor = $("cSex").value === "m" ? 1500 : 1200;
-  const goal = Math.max(floor, Math.round((tdee - +$("cDeficit").value) / 10) * 10);
-  $("goalInput").value = goal;
-  $("calcResult").textContent = `Bazal: ${fmt(bmr)} kcal · Günlük harcama: ${fmt(tdee)} kcal → Hedef: ${fmt(goal)} kcal`;
-};
+initSettings({ onSaved: render });
 
-$("exportBtn").onclick = () => {
-  const blob = new Blob([JSON.stringify({ meals, goal: settings.goal }, null, 1)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `kalori-${dayKey(new Date())}.json`;
-  a.click();
-};
-$("importInput").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
-  try {
-    const data = JSON.parse(await file.text());
-    if (!Array.isArray(data.meals)) throw new Error();
-    if (!confirm(`${data.meals.length} öğün içe aktarılacak ve mevcut verilerin yerini alacak. Devam?`)) return;
-    meals = data.meals;
-    if (data.goal) settings.goal = data.goal;
-    save(LS_MEALS, meals);
-    save(LS_SETTINGS, settings);
-    sDlg.close();
-    render();
-  } catch {
-    alert("Geçersiz dosya.");
-  }
-});
+const busy = () => !!session || settingsOpen() || suggestOpen();
+initAutoUpdate(busy);
+initPullToRefresh(busy);
 
-// Gün değişince (uygulama arka planda açık kaldıysa) bugüne dön
 let lastToday = currentDay;
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  const today = dayKey(new Date());
-  if (today !== lastToday && currentDay === lastToday && !session) currentDay = today;
+  const today = dayKey();
+  if (today !== lastToday && currentDay === lastToday && !session) currentDay = today; // gece yarısı geçtiyse bugüne geç
   lastToday = today;
   render();
 });
