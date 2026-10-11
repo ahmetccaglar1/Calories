@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#107a57">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Kalori">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <title>Kalori Günlüğü</title>
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" id="prevDay" aria-label="Önceki gün">‹</button>
+    <h1 id="dayTitle">Bugün</h1>
+    <button class="icon-btn" id="nextDay" aria-label="Sonraki gün">›</button>
+    <button class="icon-btn settings" id="openSettings" aria-label="Ayarlar">⚙︎</button>
+  </header>
+
+  <main>
+    <section class="summary card">
+      <div class="ring-wrap">
+        <svg viewBox="0 0 120 120" class="ring">
+          <circle cx="60" cy="60" r="52" class="ring-bg"/>
+          <circle cx="60" cy="60" r="52" class="ring-fg" id="ringFg"/>
+        </svg>
+        <div class="ring-text">
+          <div class="big" id="eaten">0</div>
+          <div class="small">/ <span id="target">0</span> kcal</div>
+        </div>
+      </div>
+      <div class="stats">
+        <div><span class="label">Kalan</span><span class="val" id="remaining">0</span></div>
+        <div><span class="label">Protein</span><span class="val" id="protein">0 g</span></div>
+        <div><span class="label">Karbonhidrat</span><span class="val" id="carbs">0 g</span></div>
+        <div><span class="label">Yağ</span><span class="val" id="fat">0 g</span></div>
+      </div>
+    </section>
+
+    <div class="banner hidden" id="banner"></div>
+
+    <section>
+      <h2>Öğünler</h2>
+      <ul class="meals" id="meals"></ul>
+      <p class="empty" id="emptyMeals">Henüz bir şey eklemedin. Yediğinin fotoğrafını çek 📸</p>
+    </section>
+  </main>
+
+  <div class="fab-row">
+    <label class="fab" for="photoInput">📷 Fotoğraf çek</label>
+    <button class="fab secondary" id="textMealBtn">✍︎ Yaz</button>
+  </div>
+  <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+
+  <!-- Analysis sheet -->
+  <dialog id="analyzeDialog" class="sheet">
+    <form method="dialog" id="analyzeForm">
+      <div class="sheet-head">
+        <h3>Yemek analizi</h3>
+        <button class="icon-btn" value="cancel" formnovalidate aria-label="Kapat">✕</button>
+      </div>
+      <img id="previewImg" class="preview hidden" alt="">
+      <label class="field">
+        <span>Not (isteğe bağlı)</span>
+        <textarea id="mealNote" rows="2" placeholder="örn. akşam yemeği, yarısını yedim, 2 dilim ekmek de vardı"></textarea>
+      </label>
+      <div id="analysisArea"></div>
+      <div class="sheet-actions" id="analyzeActions"></div>
+    </form>
+  </dialog>
+
+  <!-- Settings sheet -->
+  <dialog id="settingsDialog" class="sheet">
+    <form method="dialog" id="settingsForm">
+      <div class="sheet-head">
+        <h3>Ayarlar</h3>
+        <button class="icon-btn" value="cancel" formnovalidate aria-label="Kapat">✕</button>
+      </div>
+      <label class="field">
+        <span>Günlük kalori hedefi (kcal)</span>
+        <input type="number" id="goalInput" min="800" max="6000" step="10" required>
+      </label>
+      <details class="calc">
+        <summary>Hedefimi hesapla (kalori açığı)</summary>
+        <div class="grid2">
+          <label class="field"><span>Cinsiyet</span>
+            <select id="cSex"><option value="m">Erkek</option><option value="f">Kadın</option></select></label>
+          <label class="field"><span>Yaş</span><input type="number" id="cAge" value="28"></label>
+          <label class="field"><span>Boy (cm)</span><input type="number" id="cHeight" value="178"></label>
+          <label class="field"><span>Kilo (kg)</span><input type="number" id="cWeight" value="80"></label>
+          <label class="field"><span>Aktivite</span>
+            <select id="cAct">
+              <option value="1.2">Hareketsiz</option>
+              <option value="1.375" selected>Hafif aktif</option>
+              <option value="1.55">Orta aktif</option>
+              <option value="1.725">Çok aktif</option>
+            </select></label>
+          <label class="field"><span>Açık</span>
+            <select id="cDeficit">
+              <option value="300">-300 kcal (yavaş)</option>
+              <option value="500" selected>-500 kcal (~0.5 kg/hafta)</option>
+              <option value="750">-750 kcal (hızlı)</option>
+            </select></label>
+        </div>
+        <p class="hint" id="calcResult"></p>
+        <button type="button" class="btn secondary" id="calcBtn">Hesapla ve uygula</button>
+      </details>
+      <label class="field">
+        <span>Anthropic API anahtarı</span>
+        <input type="password" id="keyInput" placeholder="sk-ant-..." autocomplete="off">
+        <small class="hint">Anahtar sadece bu cihazda saklanır ve yalnızca api.anthropic.com'a gönderilir.</small>
+      </label>
+      <div class="sheet-actions">
+        <button class="btn" value="save" id="saveSettings">Kaydet</button>
+      </div>
+      <hr>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="exportBtn">Verileri dışa aktar</button>
+        <label class="btn ghost" for="importInput">İçe aktar</label>
+        <input type="file" id="importInput" accept="application/json" hidden>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
