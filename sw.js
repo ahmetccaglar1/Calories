@@ -1,8 +1,8 @@
 // Uygulama kabuğunu önbelleğe alır; API istekleri her zaman ağdan gider.
-const CACHE = "kalori-v3";
+const CACHE = "kalori-v4";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "prompt.js", "gemini.js", "claude.js", "manifest.json",
-  "icons/icon-180.png?v=2", "icons/icon-192.png?v=2", "icons/icon-512.png?v=2", "icons/logo.svg?v=2",
+  "apple-touch-icon.png", "apple-touch-icon-precomposed.png", "icons/app-icon-192.png", "icons/app-icon-512.png",
 ];
 
 self.addEventListener("install", (e) => {
