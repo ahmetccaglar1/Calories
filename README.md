@@ -5,14 +5,19 @@ gerekirse "nasıl pişti, ne kadar yağ kondu, hepsini yedin mi?" gibi sorular s
 tahmini günceller ve günlük loga ekler. Günlük kalori hedefine ulaştığında **"Bugünlük yemek bitti"** uyarısı verir.
 
 ## Özellikler
-- 📷 Fotoğrafla veya ✍︎ yazarak öğün ekleme
-- 🤖 Google Gemini (ücretsiz kota) ile görüntü analizi, kalem kalem kcal / protein / karbonhidrat / yağ.
+- 📷 Kamerayla, 🖼 galeriden veya ✍︎ yazarak öğün ekleme
+- 🤖 Google Gemini (ücretsiz kota) ile görüntü analizi, kalem kalem kcal / protein / karbonhidrat / yağ, toplam lif ve şeker.
   İstenirse ayarlardan ücretli Anthropic Claude'a geçilebilir.
 - ❓ Belirsizlikler için hazır cevaplı takip soruları (pişirme yöntemi, yağ miktarı, porsiyon…)
-- ✏️ Kaydetmeden önce toplam kaloriyi elle düzeltebilme
-- 🎯 Günlük hedef + hedef hesaplayıcı (Mifflin-St Jeor + seçilen kalori açığı)
+- 🎯 Ayarlanabilir kalori ve makro hedefleri (protein, karbonhidrat, yağ, lif); ana ekranda ilerleme çubukları
+- 🩺 Sağlık profili: sağlık durumunu ve tahlil değerlerini kendi cümlelerinle yaz (istersen tahlil fotoğrafı ekle);
+  yapay zeka kalori/makro hedeflerini ve diyet kurallarını buna göre belirler (örn. insülin direnci → düşük karbonhidrat, yüksek lif).
+  Öğün analizleri bu profile göre uyarı verir.
+- 🍳 "Ne yesem?": kalan kalori ve makrolara, sağlık profiline ve elindeki malzemelere göre tarif / hızlı / dışarıda önerileri;
+  "Bunu yedim" ile tek dokunuşla kaydet
 - 🟠 %85'te "az kaldı", 🛑 %100'de "bugünlük yemek bitti" uyarısı
-- 📅 Geçmiş günlerde gezinme, JSON dışa/içe aktarma
+- 🔄 Yeni sürüm yayınlanınca uygulama kendini otomatik yeniler; yukarıdan aşağı çekerek de yenilenir
+- 📅 Geçmiş günlerde gezinme, öğün detayları, JSON dışa/içe aktarma
 - 📱 iPhone Safari'de "Ana Ekrana Ekle" ile uygulama gibi çalışır; veriler sadece cihazda (localStorage)
 
 ## Kurulum
@@ -34,8 +39,12 @@ Anthropic'e) gider. Repo ve site herkese açık olduğu için anahtarı asla rep
 
 ## Dosyalar
 - `index.html`, `styles.css` — arayüz
-- `app.js` — günlük log, hedef, uyarılar, fotoğraf işleme
-- `prompt.js` — ortak talimat ve JSON çıktı şeması
-- `gemini.js` — Gemini çağrısı (varsayılan; model adı kalkarsa uygun Flash modelini kendisi seçer)
-- `claude.js` — Claude çağrısı (isteğe bağlı)
-- `sw.js`, `manifest.json`, `icons/` — PWA
+- `app.js` — ana ekran, özet, makrolar, öğün ekleme akışı
+- `settings.js` — hedefler, profil/sağlık, yapay zeka ayarları, veri aktarımı
+- `suggest.js` — "Ne yesem?" önerileri
+- `store.js` — veriler ve hedef hesapları (Mifflin-St Jeor)
+- `ai.js` — sağlayıcıdan bağımsız sohbet katmanı
+- `prompt.js` — yapay zeka talimatları ve JSON çıktı şemaları
+- `gemini.js` / `claude.js` — sağlayıcılar
+- `update.js` — otomatik güncelleme ve aşağı çekerek yenileme
+- `sw.js`, `manifest.json`, `apple-touch-icon*.png`, `icons/` — PWA

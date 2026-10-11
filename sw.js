@@ -1,12 +1,13 @@
 // Uygulama kabuğunu önbelleğe alır; API istekleri her zaman ağdan gider.
-const CACHE = "kalori-v5";
+const CACHE = "kalori-v6";
 const SHELL = [
-  "./", "index.html", "styles.css", "app.js", "prompt.js", "gemini.js", "claude.js", "manifest.json",
+  "./", "index.html", "styles.css", "app.js", "store.js", "util.js", "ai.js", "prompt.js",
+  "gemini.js", "claude.js", "settings.js", "suggest.js", "update.js", "manifest.json",
   "apple-touch-icon.png", "apple-touch-icon-precomposed.png", "icons/app-icon-192.png", "icons/app-icon-512.png",
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
@@ -23,8 +24,10 @@ self.addEventListener("fetch", (e) => {
   // İkon ve manifest isteklerine karışma: iOS ana ekran ikonunu doğrudan ağdan alsın.
   if (/\.png$|manifest\.json$/.test(url.pathname)) return;
   // Ağ öncelikli: güncellemeler hemen gelsin, çevrimdışıyken önbellek kullanılsın.
+  // Kendi dosyalarımızda tarayıcı önbelleğini atla (no-cache), böylece deploy sonrası eski sürüm gelmez.
+  const sameOrigin = url.origin === self.location.origin;
   e.respondWith(
-    fetch(e.request)
+    (sameOrigin ? fetch(url.href, { cache: "no-cache", credentials: "same-origin" }) : fetch(e.request))
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
