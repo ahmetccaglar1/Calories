@@ -1,8 +1,8 @@
-// Uygulama kabuğunu önbelleğe alır; API istekleri her zaman ağdan gider.
-const CACHE = "kalori-v6";
+// Uygulama kabuğunu önbelleğe alır; API istekleri her zaman doğrudan ağdan gider.
+const CACHE = "kalori-v7";
 const SHELL = [
-  "./", "index.html", "styles.css", "app.js", "store.js", "util.js", "ai.js", "prompt.js",
-  "gemini.js", "claude.js", "settings.js", "suggest.js", "update.js", "manifest.json",
+  "./", "index.html", "styles.css", "manifest.json",
+  "app.js", "nav.js", "store.js", "db.js", "util.js", "ai.js", "prompt.js", "gemini.js", "claude.js", "today.js", "meal.js", "history.js", "charts.js", "suggest.js", "profile.js", "barcode.js", "onboarding.js", "update.js",
   "apple-touch-icon.png", "apple-touch-icon-precomposed.png", "icons/app-icon-192.png", "icons/app-icon-512.png",
 ];
 
@@ -20,7 +20,8 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.hostname === "api.anthropic.com" || url.hostname === "generativelanguage.googleapis.com") return;
+  // Sadece kendi dosyalarımızı ve Claude SDK'sını (esm.sh) önbelleğe al; API'ler (Gemini, Anthropic, Open Food Facts) her zaman doğrudan ağdan
+  if (e.request.method !== "GET" || (url.origin !== self.location.origin && url.hostname !== "esm.sh")) return;
   // İkon ve manifest isteklerine karışma: iOS ana ekran ikonunu doğrudan ağdan alsın.
   if (/\.png$|manifest\.json$/.test(url.pathname)) return;
   // Ağ öncelikli: güncellemeler hemen gelsin, çevrimdışıyken önbellek kullanılsın.

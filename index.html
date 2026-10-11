@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#107a57">
+  <meta name="theme-color" content="#f5f6f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1311" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Kalori">
@@ -15,18 +16,21 @@
   <title>Kalori Günlüğü</title>
 </head>
 <body>
-  <header class="topbar">
-    <button class="icon-btn" id="prevDay" aria-label="Önceki gün">‹</button>
-    <h1 id="dayTitle">Bugün</h1>
-    <button class="icon-btn" id="nextDay" aria-label="Sonraki gün">›</button>
-    <button class="icon-btn settings" id="openSettings" aria-label="Ayarlar">⚙︎</button>
-  </header>
+  <!-- ============ BUGÜN ============ -->
+  <section class="view" id="view-today">
+    <header class="topbar">
+      <button class="icon-btn" id="prevDay" aria-label="Önceki gün">‹</button>
+      <div class="topbar-title">
+        <h1 id="dayTitle">Bugün</h1>
+        <small id="daySub"></small>
+      </div>
+      <button class="icon-btn" id="nextDay" aria-label="Sonraki gün">›</button>
+    </header>
 
-  <main>
-    <section class="summary card">
+    <div class="card summary">
       <div class="summary-top">
         <button class="ring-wrap" id="ringBtn" aria-label="Hedefleri düzenle">
-          <svg viewBox="0 0 120 120" class="ring">
+          <svg viewBox="0 0 120 120" class="ring" aria-hidden="true">
             <circle cx="60" cy="60" r="52" class="ring-bg"/>
             <circle cx="60" cy="60" r="52" class="ring-fg" id="ringFg"/>
           </svg>
@@ -42,114 +46,114 @@
         </div>
       </div>
       <div class="macros" id="macros"></div>
-    </section>
+    </div>
 
     <div class="banner hidden" id="banner"></div>
 
-    <button class="suggest-btn" id="suggestBtn">
-      <span>🍳</span>
-      <span><strong>Ne yesem?</strong><br><small id="suggestHint">Kalan hedeflerine göre yemek ve tarif önerisi</small></span>
-      <span class="chev">›</span>
-    </button>
-
-    <section>
-      <h2>Öğünler</h2>
-      <ul class="meals" id="meals"></ul>
-      <p class="empty" id="emptyMeals">Henüz bir şey eklemedin. Yediğinin fotoğrafını çek ya da galeriden seç 📸</p>
-    </section>
-  </main>
-
-  <div class="fab-row">
-    <label class="fab" for="cameraInput">📷 Kamera</label>
-    <label class="fab" for="galleryInput">🖼 Galeri</label>
-    <button class="fab secondary" id="textMealBtn">✍︎ Yaz</button>
-  </div>
-  <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-  <input type="file" id="galleryInput" accept="image/*" hidden>
-
-  <!-- Öğün analizi -->
-  <dialog id="analyzeDialog" class="sheet">
-    <form method="dialog">
-      <div class="sheet-head">
-        <h3>Yemek analizi</h3>
-        <button class="icon-btn" value="cancel" formnovalidate aria-label="Kapat">✕</button>
+    <div class="row2">
+      <div class="card water" id="waterCard">
+        <div class="water-head"><span>💧 Su</span><span class="hint" id="waterText"></span></div>
+        <div class="water-glasses" id="waterGlasses"></div>
+        <div class="water-actions">
+          <button class="round-btn" id="waterMinus" aria-label="Bir bardak çıkar">−</button>
+          <button class="round-btn primary" id="waterPlus" aria-label="Bir bardak ekle">+</button>
+        </div>
       </div>
-      <img id="previewImg" class="preview hidden" alt="">
-      <label class="field">
-        <span>Not (isteğe bağlı)</span>
-        <textarea id="mealNote" rows="2" placeholder="örn. akşam yemeği, yarısını yedim, 2 dilim ekmek de vardı"></textarea>
-      </label>
-      <div id="analysisArea"></div>
-      <div class="sheet-actions" id="analyzeActions"></div>
-    </form>
-  </dialog>
+      <button class="card suggest-card" id="goSuggest">
+        <span class="emoji">🍳</span>
+        <strong>Ne yesem?</strong>
+        <small id="suggestHint">Kalan hedeflerine göre öneri</small>
+      </button>
+    </div>
 
-  <!-- Ne yesem? -->
-  <dialog id="suggestDialog" class="sheet">
-    <form method="dialog">
-      <div class="sheet-head">
-        <h3>🍳 Ne yesem?</h3>
-        <button class="icon-btn" value="cancel" formnovalidate aria-label="Kapat">✕</button>
+    <div id="mealGroups"></div>
+    <p class="empty" id="emptyMeals">Henüz bir şey eklemedin.<br>Aşağıdaki <b>+</b> ile yediğini ekle 📸</p>
+  </section>
+
+  <!-- ============ GEÇMİŞ ============ -->
+  <section class="view hidden" id="view-history">
+    <header class="topbar"><div class="topbar-title"><h1>Geçmiş</h1></div></header>
+
+    <div class="card">
+      <div class="card-head"><h2>Bu hafta</h2><span class="hint" id="streakText"></span></div>
+      <div class="stat-tiles" id="weekStats"></div>
+      <div class="chart" id="weekChart"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Kilo</h2><span class="hint" id="etaText"></span></div>
+      <div class="weight-entry">
+        <input type="text" id="weightInput" inputmode="decimal" placeholder="Bugünkü kilon" autocomplete="off">
+        <span>kg</span>
+        <button class="btn small" id="weightSave">Kaydet</button>
       </div>
-      <div class="remaining-box" id="suggestRemaining"></div>
-      <div class="grid2">
-        <label class="field"><span>Ne tür?</span>
-          <select id="suggestType">
-            <option value="mixed">Karışık</option>
-            <option value="recipe">Evde tarif</option>
-            <option value="quick">Hızlı / hazır</option>
-            <option value="outside">Dışarıda</option>
-          </select></label>
-        <label class="field"><span>Öğün</span>
-          <select id="suggestMeal">
-            <option value="auto">Saate göre</option>
-            <option value="kahvaltı">Kahvaltı</option>
-            <option value="öğle yemeği">Öğle</option>
-            <option value="akşam yemeği">Akşam</option>
-            <option value="ara öğün">Ara öğün</option>
-          </select></label>
+      <div class="chart" id="weightChart"></div>
+      <details class="table-toggle"><summary>Tüm kayıtlar</summary><div id="weightTable"></div></details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Günler</h2></div>
+      <ul class="day-list" id="dayList"></ul>
+    </div>
+  </section>
+
+  <!-- ============ ÖNERİLER ============ -->
+  <section class="view hidden" id="view-suggest">
+    <header class="topbar"><div class="topbar-title"><h1>Ne yesem?</h1></div></header>
+    <div class="remaining-box" id="suggestRemaining"></div>
+    <div class="card form-card">
+      <div class="seg" id="suggestType" role="radiogroup" aria-label="Öneri türü">
+        <button type="button" data-v="mixed" class="on">Karışık</button>
+        <button type="button" data-v="recipe">Tarif</button>
+        <button type="button" data-v="quick">Hızlı</button>
+        <button type="button" data-v="outside">Dışarıda</button>
       </div>
+      <label class="field"><span>Öğün</span>
+        <select id="suggestMeal">
+          <option value="auto">Saate göre</option>
+          <option value="kahvaltı">Kahvaltı</option>
+          <option value="öğle yemeği">Öğle</option>
+          <option value="akşam yemeği">Akşam</option>
+          <option value="ara öğün">Ara öğün</option>
+        </select></label>
       <label class="field">
         <span>Elimdekiler / canımın istediği (isteğe bağlı)</span>
         <textarea id="suggestNote" rows="2" placeholder="örn. evde yumurta, lor, domates var; tatlı bir şey istiyorum"></textarea>
       </label>
-      <div id="suggestArea"></div>
       <div class="sheet-actions" id="suggestActions"></div>
-    </form>
-  </dialog>
+    </div>
+    <div id="suggestArea"></div>
+  </section>
 
-  <!-- Ayarlar -->
-  <dialog id="settingsDialog" class="sheet">
-    <form method="dialog" id="settingsForm">
-      <div class="sheet-head">
-        <h3>Ayarlar</h3>
-        <button class="icon-btn" value="cancel" formnovalidate aria-label="Kapat">✕</button>
-      </div>
-
-      <section class="set-section" id="goalsSection">
-        <h4>🎯 Hedefler</h4>
+  <!-- ============ PROFİL ============ -->
+  <section class="view hidden" id="view-profile">
+    <header class="topbar"><div class="topbar-title"><h1>Profil</h1></div></header>
+    <form id="settingsForm" class="profile-form" onsubmit="return false">
+      <div class="card" id="goalsSection">
+        <h2>🎯 Hedefler</h2>
         <label class="field">
           <span>Günlük kalori (kcal)</span>
-          <input type="number" id="goalInput" min="800" max="6000" step="10" inputmode="numeric" required>
+          <input type="number" id="goalInput" min="800" max="6000" step="10" inputmode="numeric">
         </label>
         <div class="grid4">
-          <label class="field"><span>Protein (g)</span><input type="number" id="mProtein" min="0" inputmode="numeric"></label>
-          <label class="field"><span>Karb. (g)</span><input type="number" id="mCarbs" min="0" inputmode="numeric"></label>
-          <label class="field"><span>Yağ (g)</span><input type="number" id="mFat" min="0" inputmode="numeric"></label>
-          <label class="field"><span>Lif (g)</span><input type="number" id="mFiber" min="0" inputmode="numeric"></label>
+          <label class="field"><span>Protein</span><input type="number" id="mProtein" min="0" inputmode="numeric"></label>
+          <label class="field"><span>Karb.</span><input type="number" id="mCarbs" min="0" inputmode="numeric"></label>
+          <label class="field"><span>Yağ</span><input type="number" id="mFat" min="0" inputmode="numeric"></label>
+          <label class="field"><span>Lif</span><input type="number" id="mFiber" min="0" inputmode="numeric"></label>
         </div>
         <p class="hint" id="macroKcalHint"></p>
-        <button type="button" class="btn ghost small" id="autoMacrosBtn">Makroları kaloriye göre otomatik dağıt</button>
-      </section>
+        <button type="button" class="btn ghost small" id="autoMacrosBtn">Makroları kaloriye göre dağıt</button>
+      </div>
 
-      <section class="set-section">
-        <h4>🧍 Profil ve sağlık</h4>
+      <div class="card">
+        <h2>🧍 Profil ve sağlık</h2>
         <div class="grid2">
           <label class="field"><span>Cinsiyet</span>
             <select id="pSex"><option value="m">Erkek</option><option value="f">Kadın</option></select></label>
           <label class="field"><span>Yaş</span><input type="number" id="pAge" inputmode="numeric"></label>
           <label class="field"><span>Boy (cm)</span><input type="number" id="pHeight" inputmode="numeric"></label>
-          <label class="field"><span>Kilo (kg)</span><input type="number" id="pWeight" inputmode="decimal" step="0.1"></label>
+          <label class="field"><span>Kilo (kg)</span><input type="text" id="pWeight" inputmode="decimal" autocomplete="off"></label>
+          <label class="field"><span>Hedef kilo (kg)</span><input type="text" id="pTargetWeight" inputmode="decimal" placeholder="isteğe bağlı" autocomplete="off"></label>
           <label class="field"><span>Aktivite</span>
             <select id="pActivity">
               <option value="1.2">Hareketsiz</option>
@@ -165,9 +169,9 @@
             </select></label>
           <label class="field" id="paceField"><span>Kalori açığı</span>
             <select id="pPace">
-              <option value="300">-300 kcal · yavaş</option>
-              <option value="500">-500 kcal · orta</option>
-              <option value="750">-750 kcal · hızlı</option>
+              <option value="300">-300 · yavaş</option>
+              <option value="500">-500 · orta</option>
+              <option value="750">-750 · hızlı</option>
             </select></label>
         </div>
         <label class="field">
@@ -184,10 +188,10 @@
         <div id="profileResult"></div>
         <div id="currentGuidelines"></div>
         <p class="hint">Yapay zekanın önerileri bilgilendirme amaçlıdır; doktor veya diyetisyen tavsiyesinin yerine geçmez.</p>
-      </section>
+      </div>
 
-      <section class="set-section">
-        <h4>🤖 Yapay zeka</h4>
+      <div class="card">
+        <h2>🤖 Yapay zeka</h2>
         <label class="field">
           <span>Sağlayıcı</span>
           <select id="providerInput">
@@ -197,30 +201,149 @@
         </label>
         <label class="field" data-provider="gemini">
           <span>Gemini API anahtarı</span>
-          <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
-          <small class="hint">Ücretsiz anahtar: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Google hesabınla gir → <b>Create API key</b> → kopyala, buraya yapıştır.</small>
+          <span class="key-row">
+            <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
+            <button type="button" class="btn ghost small paste-btn" data-target="geminiKeyInput">Yapıştır</button>
+          </span>
+          <small class="hint">Ücretsiz anahtar: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Google ile gir → <b>Create API key</b> → kopyala.</small>
+        </label>
+        <label class="field" data-provider="gemini">
+          <span>Öğün analizi</span>
+          <select id="speedInput">
+            <option value="fast">Hızlı (Flash-Lite)</option>
+            <option value="balanced">Daha doğru (Flash)</option>
+          </select>
         </label>
         <label class="field" data-provider="claude">
           <span>Anthropic API anahtarı</span>
-          <input type="password" id="claudeKeyInput" placeholder="sk-ant-..." autocomplete="off">
+          <span class="key-row">
+            <input type="password" id="claudeKeyInput" placeholder="sk-ant-..." autocomplete="off">
+            <button type="button" class="btn ghost small paste-btn" data-target="claudeKeyInput">Yapıştır</button>
+          </span>
           <small class="hint">console.anthropic.com → API Keys. Kullanım başına ücretlendirilir.</small>
         </label>
-        <small class="hint">Anahtar sadece bu cihazda saklanır, başka hiçbir yere gönderilmez.</small>
-      </section>
-
-      <div class="sheet-actions sticky">
-        <button class="btn" value="save" id="saveSettings">Kaydet</button>
+        <small class="hint">Anahtar sadece bu cihazda saklanır.</small>
       </div>
 
-      <section class="set-section">
-        <h4>💾 Veri</h4>
+      <div class="card">
+        <h2>💾 Veri</h2>
         <div class="sheet-actions">
           <button type="button" class="btn ghost" id="exportBtn">Dışa aktar</button>
           <label class="btn ghost" for="importInput">İçe aktar</label>
           <input type="file" id="importInput" accept="application/json" hidden>
         </div>
-      </section>
+        <button type="button" class="btn ghost small" id="rerunOnboarding">Kurulum sihirbazını yeniden aç</button>
+      </div>
+
+      <div class="save-bar"><button type="button" class="btn" id="saveSettings">Kaydet</button></div>
     </form>
+  </section>
+
+  <!-- ============ SEKME ÇUBUĞU ============ -->
+  <nav class="tabbar" aria-label="Sekmeler">
+    <button data-tab="today" class="on"><span class="ti">◉</span><span>Bugün</span></button>
+    <button data-tab="history"><span class="ti">▤</span><span>Geçmiş</span></button>
+    <button class="tab-add" id="addBtn" aria-label="Öğün ekle"><span>+</span></button>
+    <button data-tab="suggest"><span class="ti">✦</span><span>Öneriler</span></button>
+    <button data-tab="profile"><span class="ti">◍</span><span>Profil</span></button>
+  </nav>
+
+  <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+  <input type="file" id="galleryInput" accept="image/*" hidden>
+
+  <!-- Öğün ekle menüsü -->
+  <dialog id="addDialog" class="sheet">
+    <div class="sheet-body">
+      <div class="sheet-head"><h3>Öğün ekle</h3><button class="icon-btn" data-close aria-label="Kapat">✕</button></div>
+      <div class="add-grid">
+        <label for="cameraInput" class="add-tile"><span>📷</span>Kamera</label>
+        <label for="galleryInput" class="add-tile"><span>🖼</span>Galeri</label>
+        <button class="add-tile" id="barcodeBtn"><span>▦</span>Barkod</button>
+        <button class="add-tile" id="textMealBtn"><span>✍︎</span>Yaz</button>
+      </div>
+      <div class="seg small" id="quickTabs">
+        <button type="button" data-v="recent" class="on">Son yenenler</button>
+        <button type="button" data-v="fav">⭐ Favoriler</button>
+      </div>
+      <ul class="quick-list" id="quickList"></ul>
+    </div>
+  </dialog>
+
+  <!-- Öğün analizi -->
+  <dialog id="analyzeDialog" class="sheet">
+    <div class="sheet-body">
+      <div class="sheet-head"><h3>Yemek analizi</h3><button class="icon-btn" data-close aria-label="Kapat">✕</button></div>
+      <img id="previewImg" class="preview hidden" alt="">
+      <label class="field">
+        <span>Not (isteğe bağlı)</span>
+        <textarea id="mealNote" rows="2" placeholder="örn. akşam yemeği, yarısını yedim, 2 dilim ekmek de vardı"></textarea>
+      </label>
+      <div id="analysisArea"></div>
+      <div class="sheet-actions" id="analyzeActions"></div>
+    </div>
+  </dialog>
+
+  <!-- Öğün düzenle -->
+  <dialog id="editDialog" class="sheet">
+    <div class="sheet-body">
+      <div class="sheet-head"><h3>Öğünü düzenle</h3><button class="icon-btn" data-close aria-label="Kapat">✕</button></div>
+      <label class="field"><span>Ad</span><input type="text" id="eName"></label>
+      <div class="grid2">
+        <label class="field"><span>Öğün</span><select id="eType"></select></label>
+        <label class="field"><span>Saat</span><input type="time" id="eTime"></label>
+      </div>
+      <div class="field"><span>Porsiyon</span>
+        <div class="seg" id="ePortion">
+          <button type="button" data-v="0.5">½</button>
+          <button type="button" data-v="0.75">¾</button>
+          <button type="button" data-v="1" class="on">1</button>
+          <button type="button" data-v="1.5">1½</button>
+          <button type="button" data-v="2">2</button>
+        </div>
+      </div>
+      <div class="grid4">
+        <label class="field"><span>kcal</span><input type="number" id="eKcal" inputmode="numeric"></label>
+        <label class="field"><span>Protein</span><input type="number" id="eProtein" inputmode="numeric"></label>
+        <label class="field"><span>Karb.</span><input type="number" id="eCarbs" inputmode="numeric"></label>
+        <label class="field"><span>Yağ</span><input type="number" id="eFat" inputmode="numeric"></label>
+      </div>
+      <div id="eDetail"></div>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="eFav">☆ Favorilere ekle</button>
+        <button type="button" class="btn ghost danger" id="eDelete">Sil</button>
+      </div>
+      <div class="sheet-actions"><button type="button" class="btn" id="eSave">Kaydet</button></div>
+    </div>
+  </dialog>
+
+  <!-- Barkod -->
+  <dialog id="barcodeDialog" class="sheet">
+    <div class="sheet-body">
+      <div class="sheet-head"><h3>Barkod okut</h3><button class="icon-btn" data-close aria-label="Kapat">✕</button></div>
+      <div class="scanner" id="scanner">
+        <video id="scanVideo" playsinline muted></video>
+        <div class="scan-frame"></div>
+      </div>
+      <p class="hint" id="scanStatus">Barkodu çerçeveye getir.</p>
+      <div class="sheet-actions">
+        <label class="btn ghost small" for="barcodePhoto">📷 Fotoğraftan oku</label>
+        <input type="file" id="barcodePhoto" accept="image/*" capture="environment" hidden>
+      </div>
+      <div class="key-row">
+        <input type="text" id="barcodeManual" inputmode="numeric" placeholder="veya barkod numarasını yaz">
+        <button type="button" class="btn small" id="barcodeLookup">Ara</button>
+      </div>
+      <div id="productArea"></div>
+    </div>
+  </dialog>
+
+  <!-- Kurulum sihirbazı -->
+  <dialog id="onboardDialog" class="fullscreen">
+    <div class="onboard">
+      <div class="onboard-dots" id="obDots"></div>
+      <div class="onboard-step" id="obStep"></div>
+      <div class="onboard-actions" id="obActions"></div>
+    </div>
   </dialog>
 
   <script type="module" src="app.js"></script>

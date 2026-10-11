@@ -1,15 +1,18 @@
-// Ayarlar: hedefler (kalori + makro), profil ve sağlık durumu, yapay zeka sağlayıcısı, veri aktarımı.
-import { $, esc, fmt, loadImage, resize, loadingHtml } from "./util.js";
-import { settings, saveSettings, meals, replaceMeals, dayKey, defaultMacros, macroTargets, computeGoal, minKcal, activeKey } from "./store.js";
+// "Profil" sekmesi: hedefler (kalori + makro), profil ve sağlık durumu, yapay zeka, veri aktarımı.
+import { $, esc, fmt, loadImage, resize, loadingHtml, toast, parseNum } from "./util.js";
+import {
+  settings, saveSettings, dayKey, defaultMacros, macroTargets, computeGoal, minKcal, activeKey, exportAll, importAll,
+} from "./store.js";
 import { Chat } from "./ai.js";
 import { PROFILE_SYSTEM, PROFILE_SCHEMA, profilePrompt, normalizeProfile } from "./prompt.js";
+import { onRender, rerender, showTab, nav } from "./nav.js";
+import { startOnboarding } from "./onboarding.js";
 
-const dlg = $("settingsDialog");
-let onSaved = () => {};
-let labImages = []; // tahlil fotoğrafları (base64), sadece hesaplama için; saklanmaz
+let labImages = [];       // tahlil fotoğrafları (base64), sadece hesaplama için; saklanmaz
 let pendingHealth = null; // yapay zekanın önerdiği, henüz kaydedilmemiş sağlık özeti/kurallar
+let dirty = false;        // formda kaydedilmemiş değişiklik var mı
 
-const num = (id) => Number($(id).value);
+const num = (id) => parseNum($(id).value);
 
 function readProfile() {
   return {
@@ -18,6 +21,7 @@ function readProfile() {
     age: num("pAge") || settings.profile.age,
     height: num("pHeight") || settings.profile.height,
     weight: num("pWeight") || settings.profile.weight,
+    targetWeight: num("pTargetWeight") || 0,
     activity: num("pActivity"),
     goalType: $("pGoalType").value,
     pace: num("pPace"),
@@ -35,8 +39,7 @@ function fillMacros(m) {
 
 function updateMacroHint() {
   const kcal = num("mProtein") * 4 + num("mCarbs") * 4 + num("mFat") * 9;
-  const goal = num("goalInput");
-  const diff = kcal - goal;
+  const diff = kcal - num("goalInput");
   $("macroKcalHint").textContent = `Makrolar ≈ ${fmt(kcal)} kcal` +
     (Math.abs(diff) > 50 ? ` (hedeften ${diff > 0 ? "+" : ""}${fmt(diff)} kcal farklı)` : " ✓");
 }
@@ -59,14 +62,16 @@ function syncVisibility() {
   });
 }
 
-export function openSettings(focus) {
+/** Formu kayıtlı ayarlarla doldurur. */
+function fillForm() {
   const p = settings.profile;
   $("goalInput").value = settings.goal;
   fillMacros(macroTargets());
   $("pSex").value = p.sex;
   $("pAge").value = p.age;
   $("pHeight").value = p.height;
-  $("pWeight").value = p.weight;
+  $("pWeight").value = p.weight.toLocaleString("tr-TR");
+  $("pTargetWeight").value = p.targetWeight ? p.targetWeight.toLocaleString("tr-TR") : "";
   $("pActivity").value = String(p.activity);
   $("pGoalType").value = p.goalType;
   $("pPace").value = String(p.pace);
@@ -74,14 +79,16 @@ export function openSettings(focus) {
   $("providerInput").value = settings.provider;
   $("geminiKeyInput").value = settings.geminiKey;
   $("claudeKeyInput").value = settings.claudeKey;
-  $("profileResult").innerHTML = "";
-  labImages = [];
-  pendingHealth = null;
-  $("labInfo").textContent = "";
+  $("speedInput").value = settings.speed;
   renderGuidelines(p);
   syncVisibility();
-  dlg.showModal();
-  if (focus === "goals") $("goalsSection").scrollIntoView({ block: "start" });
+  dirty = false;
+}
+
+export function openProfile(section) {
+  showTab("profile");
+  const target = section === "goals" ? "goalsSection" : section === "ai" ? "providerInput" : null;
+  if (target) setTimeout(() => $(target).scrollIntoView({ behavior: "smooth", block: "start" }), 50);
 }
 
 function saveFromForm() {
@@ -92,32 +99,47 @@ function saveFromForm() {
   settings.provider = $("providerInput").value;
   settings.geminiKey = $("geminiKeyInput").value.trim();
   settings.claudeKey = $("claudeKeyInput").value.trim();
+  settings.speed = $("speedInput").value;
   saveSettings();
   pendingHealth = null;
-  onSaved();
+  dirty = false;
+  rerender();
+}
+
+/** Yapay zekadan profil/hedef ister; sonuç nesnesini döndürür (uygulamaz). */
+export async function askProfileTargets(p, images = []) {
+  const chat = new Chat({ system: PROFILE_SYSTEM, schema: PROFILE_SCHEMA, normalize: normalizeProfile });
+  const r = await chat.send({ text: profilePrompt(p, computeGoal(p)), images });
+  return { ...r, daily_kcal: Math.max(minKcal(p.sex), Math.round(r.daily_kcal / 10) * 10) };
+}
+
+/** Yapay zeka sonucunu ayarlara uygular ve kaydeder. */
+export function applyProfileTargets(r) {
+  settings.goal = r.daily_kcal;
+  settings.macros = { protein: Math.round(r.protein_g), carbs: Math.round(r.carbs_g), fat: Math.round(r.fat_g), fiber: Math.round(r.fiber_g) };
+  Object.assign(settings.profile, { healthSummary: r.health_summary, guidelines: r.guidelines, avoid: r.avoid });
+  saveSettings();
 }
 
 async function runAiProfile() {
   const p = readProfile();
-  if (!p.age || !p.height || !p.weight) { alert("Önce yaş, boy ve kilonu gir."); return; }
+  if (!p.age || !p.height || !p.weight) { toast("Önce yaş, boy ve kilonu gir."); return; }
   settings.provider = $("providerInput").value;
   settings.geminiKey = $("geminiKeyInput").value.trim();
   settings.claudeKey = $("claudeKeyInput").value.trim();
-  if (!activeKey()) { alert("Bunun için aşağıdaki Yapay zeka bölümüne API anahtarını gir."); return; }
+  if (!activeKey()) { toast("Bunun için Yapay zeka bölümüne API anahtarını gir."); $("providerInput").scrollIntoView({ behavior: "smooth" }); return; }
 
   const box = $("profileResult");
   const btn = $("aiProfileBtn");
   btn.disabled = true;
   box.innerHTML = loadingHtml(labImages.length ? "Tahlillerini okuyup hedeflerini hesaplıyorum…" : "Hedeflerini hesaplıyorum…");
   try {
-    const chat = new Chat({ system: PROFILE_SYSTEM, schema: PROFILE_SCHEMA, normalize: normalizeProfile });
-    const r = await chat.send({ text: profilePrompt(p, computeGoal(p)), images: labImages });
-    const kcal = Math.max(minKcal(p.sex), Math.round(r.daily_kcal / 10) * 10);
+    const r = await askProfileTargets(p, labImages);
     box.innerHTML = `
       <div class="result">
         <div class="title"><span>Önerilen hedefler</span></div>
         <div class="target-grid">
-          <div><b>${fmt(kcal)}</b><span>kcal</span></div>
+          <div><b>${fmt(r.daily_kcal)}</b><span>kcal</span></div>
           <div><b>${fmt(r.protein_g)} g</b><span>protein</span></div>
           <div><b>${fmt(r.carbs_g)} g</b><span>karb.</span></div>
           <div><b>${fmt(r.fat_g)} g</b><span>yağ</span></div>
@@ -131,12 +153,13 @@ async function runAiProfile() {
     apply.className = "btn";
     apply.textContent = "✓ Bu hedefleri uygula ve kaydet";
     apply.onclick = () => {
-      $("goalInput").value = kcal;
+      $("goalInput").value = r.daily_kcal;
       fillMacros({ protein: r.protein_g, carbs: r.carbs_g, fat: r.fat_g, fiber: r.fiber_g });
       pendingHealth = { healthSummary: r.health_summary, guidelines: r.guidelines, avoid: r.avoid };
       saveFromForm();
       apply.textContent = "Kaydedildi ✓";
       apply.disabled = true;
+      toast("Hedeflerin güncellendi");
     };
     box.append(apply);
   } catch (err) {
@@ -146,21 +169,22 @@ async function runAiProfile() {
   }
 }
 
-export function initSettings(opts) {
-  onSaved = opts.onSaved;
+export function initProfile() {
+  // Sekme her açıldığında, kaydedilmemiş değişiklik yoksa formu güncel ayarlarla doldur
+  onRender(() => { if (nav.tab === "profile" && !dirty) fillForm(); });
+  $("settingsForm").addEventListener("input", () => { dirty = true; });
 
-  $("openSettings").onclick = () => openSettings();
   $("providerInput").onchange = syncVisibility;
   $("pGoalType").onchange = syncVisibility;
   ["goalInput", "mProtein", "mCarbs", "mFat"].forEach((id) => $(id).addEventListener("input", updateMacroHint));
-
-  $("autoMacrosBtn").onclick = () => fillMacros(defaultMacros(num("goalInput") || settings.goal, num("pWeight") || settings.profile.weight));
+  $("autoMacrosBtn").onclick = () => { fillMacros(defaultMacros(num("goalInput") || settings.goal, num("pWeight") || settings.profile.weight)); dirty = true; };
 
   $("simpleCalcBtn").onclick = () => {
     const p = readProfile();
     const g = computeGoal(p);
     $("goalInput").value = g.kcal;
     fillMacros(defaultMacros(g.kcal, p.weight));
+    dirty = true;
     $("profileResult").innerHTML = `<p class="hint">Bazal: ${fmt(g.bmr)} kcal · Günlük harcama: ${fmt(g.tdee)} kcal → Hedef: ${fmt(g.kcal)} kcal. Kaydet'e basmayı unutma.</p>`;
   };
 
@@ -175,14 +199,19 @@ export function initSettings(opts) {
   });
 
   $("aiProfileBtn").onclick = runAiProfile;
+  $("saveSettings").onclick = () => { saveFromForm(); toast("Kaydedildi ✓"); };
 
-  $("settingsForm").addEventListener("submit", (e) => {
-    if (e.submitter?.value === "save") saveFromForm();
+  document.querySelectorAll(".paste-btn").forEach((b) => {
+    b.onclick = async () => {
+      try {
+        const text = (await navigator.clipboard.readText()).trim();
+        if (text) { $(b.dataset.target).value = text; dirty = true; toast("Yapıştırıldı. Kaydet'e basmayı unutma."); }
+      } catch { toast("Panoya erişilemedi. Kutuya basılı tutup Yapıştır'ı seç."); }
+    };
   });
 
   $("exportBtn").onclick = () => {
-    const { geminiKey, claudeKey, ...safe } = settings; // anahtarlar dışa aktarılmaz
-    const blob = new Blob([JSON.stringify({ meals, settings: safe }, null, 1)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(exportAll(), null, 1)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `kalori-${dayKey()}.json`;
@@ -194,20 +223,17 @@ export function initSettings(opts) {
     e.target.value = "";
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      if (!Array.isArray(data.meals)) throw new Error();
-      if (!confirm(`${data.meals.length} öğün içe aktarılacak ve mevcut verilerin yerini alacak. Devam?`)) return;
-      replaceMeals(data.meals);
-      const s = data.settings ?? (data.goal ? { goal: data.goal } : {});
-      const { geminiKey, claudeKey, apiKey, ...rest } = s;
-      Object.assign(settings, rest, { profile: { ...settings.profile, ...(rest.profile ?? {}) } });
-      saveSettings();
-      dlg.close();
-      onSaved();
+      const obj = JSON.parse(await file.text());
+      if (!Array.isArray(obj.meals)) throw new Error();
+      if (!confirm(`${obj.meals.length} öğün içe aktarılacak ve mevcut verilerin yerini alacak. Devam?`)) return;
+      await importAll(obj);
+      fillForm();
+      rerender();
+      toast("Veriler içe aktarıldı");
     } catch {
-      alert("Geçersiz dosya.");
+      toast("Geçersiz dosya.");
     }
   });
-}
 
-export const settingsOpen = () => dlg.open;
+  $("rerunOnboarding").onclick = startOnboarding;
+}
