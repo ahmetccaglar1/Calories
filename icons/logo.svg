@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1fb47f"/>
+      <stop offset="1" stop-color="#0a5c41"/>
+    </linearGradient>
+    <linearGradient id="apple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6f5ee"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#063b2a" flood-opacity=".35"/></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- progress ring -->
+  <circle cx="256" cy="268" r="150" fill="none" stroke="#ffffff" stroke-opacity=".18" stroke-width="26"/>
+  <circle cx="256" cy="268" r="150" fill="none" stroke="#ffd166" stroke-width="26" stroke-linecap="round"
+          stroke-dasharray="706.9 942.5" transform="rotate(-90 256 268)"/>
+  <g transform="translate(256 280) scale(1.1) translate(-256 -268)" filter="url(#sh)">
+  <!-- apple -->
+  <path fill="url(#apple)" d="M256 214
+    C 236 196, 196 190, 172 214
+    C 146 240, 150 290, 170 322
+    C 186 348, 208 366, 230 362
+    C 242 360, 248 354, 256 354
+    C 264 354, 270 360, 282 362
+    C 304 366, 326 348, 342 322
+    C 362 290, 366 240, 340 214
+    C 316 190, 276 196, 256 214 Z"/>
+  <!-- stem + leaf -->
+  <path d="M256 216 C 254 196, 258 180, 268 166" fill="none" stroke="#7a4a22" stroke-width="10" stroke-linecap="round"/>
+  <path fill="#9be15d" d="M266 176 C 278 150, 310 144, 330 150 C 322 172, 296 186, 266 176 Z"/>
+  <!-- bite highlight -->
+  <ellipse cx="210" cy="250" rx="14" ry="26" fill="#ffffff" opacity=".9" transform="rotate(20 210 250)"/>
+  </g>
+</svg>
