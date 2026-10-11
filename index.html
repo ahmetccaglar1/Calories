@@ -109,10 +109,23 @@
         <button type="button" class="btn secondary" id="calcBtn">Hesapla ve uygula</button>
       </details>
       <label class="field">
-        <span>Anthropic API anahtarı</span>
-        <input type="password" id="keyInput" placeholder="sk-ant-..." autocomplete="off">
-        <small class="hint">Anahtar sadece bu cihazda saklanır ve yalnızca api.anthropic.com'a gönderilir.</small>
+        <span>Yapay zeka</span>
+        <select id="providerInput">
+          <option value="gemini">Google Gemini (ücretsiz)</option>
+          <option value="claude">Anthropic Claude (ücretli)</option>
+        </select>
       </label>
+      <label class="field" data-provider="gemini">
+        <span>Gemini API anahtarı</span>
+        <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
+        <small class="hint">Ücretsiz anahtar: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Google hesabınla gir → <b>Create API key</b> → kopyala, buraya yapıştır.</small>
+      </label>
+      <label class="field" data-provider="claude">
+        <span>Anthropic API anahtarı</span>
+        <input type="password" id="claudeKeyInput" placeholder="sk-ant-..." autocomplete="off">
+        <small class="hint">console.anthropic.com → API Keys. Kullanım başına ücretlendirilir.</small>
+      </label>
+      <small class="hint">Anahtar sadece bu cihazda saklanır, başka hiçbir yere gönderilmez.</small>
       <div class="sheet-actions">
         <button class="btn" value="save" id="saveSettings">Kaydet</button>
       </div>

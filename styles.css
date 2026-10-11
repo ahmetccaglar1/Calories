@@ -152,3 +152,4 @@ hr { border: 0; border-top: 1px solid var(--line); width: 100%; }
 .error { background: var(--stop-soft); color: var(--stop); border-radius: 12px; padding: 12px; font-size: .9rem; }
 .kcal-edit { display: flex; align-items: center; gap: 8px; }
 .kcal-edit input { width: 110px; }
+.hint a { color: var(--accent); }

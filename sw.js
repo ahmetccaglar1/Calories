@@ -1,9 +1,8 @@
 // Uygulama kabuğunu önbelleğe alır; API istekleri her zaman ağdan gider.
-const CACHE = "kalori-v1";
+const CACHE = "kalori-v2";
 const SHELL = [
-  "./", "index.html", "styles.css", "app.js", "ai.js", "manifest.json",
+  "./", "index.html", "styles.css", "app.js", "prompt.js", "gemini.js", "claude.js", "manifest.json",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
-  "https://esm.sh/@anthropic-ai/sdk@0.128.0",
 ];
 
 self.addEventListener("install", (e) => {
@@ -20,7 +19,7 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.hostname === "api.anthropic.com") return;
+  if (e.request.method !== "GET" || url.hostname === "api.anthropic.com" || url.hostname === "generativelanguage.googleapis.com") return;
   // Ağ öncelikli: güncellemeler hemen gelsin, çevrimdışıyken önbellek kullanılsın.
   e.respondWith(
     fetch(e.request)

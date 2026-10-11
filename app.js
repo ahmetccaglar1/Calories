@@ -1,4 +1,4 @@
-import { MealAnalysis, AiError } from "./ai.js";
+import { AiError } from "./prompt.js";
 
 // ---------- Storage ----------
 const LS_MEALS = "kalori.meals";
@@ -13,7 +13,9 @@ const save = (key, value) => {
 };
 
 let meals = load(LS_MEALS, []);
-let settings = { goal: 2000, apiKey: "", ...load(LS_SETTINGS, {}) };
+let settings = { goal: 2000, provider: "gemini", geminiKey: "", claudeKey: "", ...load(LS_SETTINGS, {}) };
+if (settings.apiKey) { settings.claudeKey ||= settings.apiKey; delete settings.apiKey; } // eski sürümden taşı
+const activeKey = () => (settings.provider === "claude" ? settings.claudeKey : settings.geminiKey);
 
 const dayKey = (d) => {
   const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -140,8 +142,8 @@ const actions = $("analyzeActions");
 let session = null; // { analysis, imageB64, thumb, result }
 
 function ensureKey() {
-  if (settings.apiKey) return true;
-  alert("Önce ayarlardan Anthropic API anahtarını gir.");
+  if (activeKey()) return true;
+  alert(settings.provider === "claude" ? "Önce ayarlardan Anthropic API anahtarını gir." : "Önce ayarlardan ücretsiz Gemini API anahtarını gir.");
   openSettings();
   return false;
 }
@@ -152,8 +154,13 @@ function confirmIfDone() {
   return confirm(`🛑 Bugünlük hedefine ulaştın (${fmt(t.kcal)} / ${fmt(settings.goal)} kcal).\nYine de bu öğünü kaydetmek istiyor musun?`);
 }
 
+async function newAnalysis() {
+  const mod = settings.provider === "claude" ? await import("./claude.js") : await import("./gemini.js");
+  return new mod.MealAnalysis(activeKey());
+}
+
 function openAnalysis({ imageB64 = null, thumb = null, preview = null }) {
-  session = { analysis: new MealAnalysis(settings.apiKey), imageB64, thumb, result: null };
+  session = { analysis: null, imageB64, thumb, result: null };
   $("mealNote").value = "";
   $("previewImg").classList.toggle("hidden", !preview);
   if (preview) $("previewImg").src = preview;
@@ -192,6 +199,7 @@ async function runStart() {
   const t = totalsFor(currentDay);
   const context = `kullanıcının günlük hedefi ${settings.goal} kcal, bugün şu ana kadar ${Math.round(t.kcal)} kcal yedi`;
   try {
+    session.analysis ??= await newAnalysis();
     session.result = await session.analysis.start({ imageBase64: session.imageB64, note, context });
     showResult();
   } catch (err) {
@@ -319,15 +327,26 @@ $("textMealBtn").onclick = () => { if (ensureKey() && confirmIfDone()) openAnaly
 const sDlg = $("settingsDialog");
 function openSettings() {
   $("goalInput").value = settings.goal;
-  $("keyInput").value = settings.apiKey;
+  $("providerInput").value = settings.provider;
+  $("geminiKeyInput").value = settings.geminiKey;
+  $("claudeKeyInput").value = settings.claudeKey;
+  syncProviderFields();
   $("calcResult").textContent = "";
   sDlg.showModal();
 }
+function syncProviderFields() {
+  document.querySelectorAll("[data-provider]").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.provider !== $("providerInput").value);
+  });
+}
+$("providerInput").onchange = syncProviderFields;
 $("openSettings").onclick = openSettings;
 $("settingsForm").addEventListener("submit", (e) => {
   if (e.submitter?.value !== "save") return;
   settings.goal = Number($("goalInput").value) || settings.goal;
-  settings.apiKey = $("keyInput").value.trim();
+  settings.provider = $("providerInput").value;
+  settings.geminiKey = $("geminiKeyInput").value.trim();
+  settings.claudeKey = $("claudeKeyInput").value.trim();
   save(LS_SETTINGS, settings);
   render();
 });
@@ -382,4 +401,4 @@ document.addEventListener("visibilitychange", () => {
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 render();
-if (!settings.apiKey) openSettings();
+if (!activeKey()) openSettings();
