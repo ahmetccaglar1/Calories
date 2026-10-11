@@ -94,6 +94,8 @@ export const suggestSystem = (context) => `Sen pratik bir diyetisyen ve aşçıs
 - type: "recipe" evde yapılacak tarif, "quick" hazırlığı 5 dakikayı geçmeyen/hazır, "outside" dışarıda/restoranda sipariş edilebilecek.
 - Tariflerde malzemeleri gram/ölçüyle, adımları kısa ve net yaz. "quick" ve "outside" için steps kısa olabilir.
 - "why": bu önerinin kullanıcının kalan hedeflerine ve sağlık durumuna neden uyduğu, tek cümle.
+- Çeşitlilik çok önemli: kullanıcının son günlerde yediklerini ve ona daha önce önerilenleri TEKRAR ETME;
+  farklı protein kaynakları, mutfaklar ve pişirme yöntemleri kullan. Favorileri zevkini anlamak için ipucudur, aynısını önerme.
 - Kullanıcı başka öneri isterse öncekilerden farklı 3 öneri ver.
 ${COMMON}
 

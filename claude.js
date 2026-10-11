@@ -22,18 +22,26 @@ export const userTurn = ({ text, images }) => ({
   ],
 });
 
-export async function complete({ apiKey, system, turns, schema }) {
+export async function complete({ apiKey, system, turns, schema, onText }) {
+  const params = {
+    model: MODEL,
+    max_tokens: 16000,
+    system,
+    messages: turns,
+    output_config: { effort: "medium", format: { type: "json_schema", schema } },
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+  };
   let response;
   try {
-    response = await getClient(apiKey).beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system,
-      messages: turns,
-      output_config: { effort: "medium", format: { type: "json_schema", schema } },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-    });
+    if (onText) {
+      let text = "";
+      const stream = getClient(apiKey).beta.messages.stream(params);
+      stream.on("text", (delta) => { text += delta; onText(text); });
+      response = await stream.finalMessage();
+    } else {
+      response = await getClient(apiKey).beta.messages.create(params);
+    }
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) throw new AiError("API anahtarı geçersiz. Ayarlardan kontrol et.");
     if (err instanceof Anthropic.PermissionDeniedError) throw new AiError("Bu API anahtarının modele erişim izni yok.");

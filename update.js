@@ -1,9 +1,10 @@
 // Yeni sürüm kontrolü (deploy sonrası otomatik yenileme) ve aşağı çekerek yenileme.
+import { toast } from "./util.js";
 
 // Sitedeki bu dosyalardan biri değişirse yeni sürüm çıkmış demektir.
 const FILES = [
-  "./", "styles.css", "app.js", "store.js", "util.js", "ai.js", "prompt.js", "gemini.js", "claude.js",
-  "settings.js", "suggest.js", "update.js", "sw.js", "manifest.json",
+  "./", "styles.css", "sw.js", "manifest.json",
+  "app.js", "nav.js", "store.js", "db.js", "util.js", "ai.js", "prompt.js", "gemini.js", "claude.js", "today.js", "meal.js", "history.js", "charts.js", "suggest.js", "profile.js", "barcode.js", "onboarding.js", "update.js",
 ];
 const CHECK_EVERY_MS = 2 * 60 * 1000;
 
@@ -20,21 +21,9 @@ async function fingerprint() {
   }
 }
 
-function toast(text) {
-  let el = document.getElementById("toast");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "toast";
-    el.className = "toast";
-    document.body.append(el);
-  }
-  el.textContent = text;
-  el.classList.add("show");
-}
-
 /** Service worker'ı güncelleyip sayfayı ağdan yeniden yükler. */
 export async function hardReload(message = "Yenileniyor…") {
-  toast(message);
+  toast(message, { duration: 0 });
   try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch {}
   location.reload();
 }
