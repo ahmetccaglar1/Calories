@@ -136,7 +136,7 @@ export async function complete({ apiKey, system, turns, schema, tier = "standard
     data = onText ? await readStream(res, onText) : await res.json();
   } catch (err) {
     if (err instanceof AiError) throw err;
-    throw new AiError("Bağlantı kurulamadı. İnterneti kontrol et.");
+    throw new AiError("Bağlantı kurulamadı. İnterneti kontrol et.", "offline");
   }
 
   const cand = data.candidates?.[0];
@@ -147,4 +147,48 @@ export async function complete({ apiKey, system, turns, schema, tier = "standard
 
   const text = (cand.content?.parts ?? []).filter((p) => p.text && !p.thought).map((p) => p.text).join("");
   return { text, turn: { role: "model", parts: [{ text }] } };
+}
+
+/**
+ * Bağlantı testi: model listesi ve her seviyedeki modele küçük bir istek.
+ * @returns {Promise<{label: string, ok: boolean, detail: string}[]>}
+ */
+export async function diagnose(apiKey) {
+  const rows = [];
+  const timed = async (fn) => { const t0 = performance.now(); const res = await fn(); return { res, ms: Math.round(performance.now() - t0) }; };
+  const errText = async (res) => { try { return (await res.json())?.error?.message ?? res.statusText; } catch { return res.statusText; } };
+  try {
+    const { res, ms } = await timed(() => fetch(`${BASE}/models?pageSize=1000`, { headers: { "x-goog-api-key": apiKey } }));
+    if (!res.ok) {
+      rows.push({ label: "Anahtar", ok: false, detail: `${res.status}: ${await errText(res)}` });
+      return rows;
+    }
+    const n = ((await res.json()).models ?? []).filter((m) => /flash/.test(m.name)).length;
+    rows.push({ label: "Anahtar", ok: true, detail: `geçerli · ${n} Flash modeli erişilebilir · ${ms} ms` });
+  } catch (e) {
+    rows.push({ label: "Bağlantı", ok: false, detail: `Google'a ulaşılamadı (${e.message})` });
+    return rows;
+  }
+  for (const [tier, label] of [["lite", "Hızlı model"], ["standard", "Standart model"]]) {
+    const t = TIERS[tier];
+    let model = localStorage.getItem(t.ls) || t.alias;
+    const ask = (m) => timed(() => fetch(`${BASE}/models/${m}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Sadece OK yaz." }] }] }),
+    }));
+    try {
+      let { res, ms } = await ask(model);
+      if (res.status === 404) {
+        const picked = await pickModel(apiKey, tier);
+        if (picked) { model = picked; localStorage.setItem(t.ls, picked); ({ res, ms } = await ask(model)); }
+      }
+      rows.push(res.ok
+        ? { label, ok: true, detail: `${model} · ${ms} ms` }
+        : { label, ok: false, detail: `${model} · ${res.status}: ${await errText(res)}` });
+    } catch (e) {
+      rows.push({ label, ok: false, detail: `${model} · bağlantı hatası (${e.message})` });
+    }
+  }
+  return rows;
 }

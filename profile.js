@@ -1,9 +1,10 @@
 // "Profil" sekmesi: hedefler (kalori + makro), profil ve sağlık durumu, yapay zeka, veri aktarımı.
 import { $, esc, fmt, loadImage, resize, loadingHtml, toast, parseNum } from "./util.js";
 import {
-  settings, saveSettings, dayKey, defaultMacros, macroTargets, computeGoal, minKcal, activeKey, exportAll, importAll,
+  settings, saveSettings, defaultMacros, macroTargets, computeGoal, minKcal, activeKey, importAll,
 } from "./store.js";
-import { Chat } from "./ai.js";
+import { Chat, diagnoseProvider } from "./ai.js";
+import { backupNow } from "./backup.js";
 import { PROFILE_SYSTEM, PROFILE_SCHEMA, profilePrompt, normalizeProfile } from "./prompt.js";
 import { onRender, rerender, showTab, nav } from "./nav.js";
 import { startOnboarding } from "./onboarding.js";
@@ -82,7 +83,34 @@ function fillForm() {
   $("speedInput").value = settings.speed;
   renderGuidelines(p);
   syncVisibility();
+  renderBackupInfo();
   dirty = false;
+}
+
+function renderBackupInfo() {
+  $("backupInfo").textContent = settings.lastBackup
+    ? `Son yedek: ${new Date(settings.lastBackup + "T12:00:00").toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}. Yedek dosyasını Dosyalar'a veya iCloud Drive'a kaydet.`
+    : "Henüz yedek almadın. Veriler sadece bu telefonda duruyor; Safari verilerini silersen kaybolur.";
+}
+
+async function runDiagnose() {
+  // Formdaki (henüz kaydedilmemiş olabilecek) anahtarı kullan
+  settings.provider = $("providerInput").value;
+  settings.geminiKey = $("geminiKeyInput").value.trim();
+  settings.claudeKey = $("claudeKeyInput").value.trim();
+  const box = $("diagResult");
+  if (!activeKey()) { box.innerHTML = `<div class="error">Önce API anahtarını gir.</div>`; return; }
+  $("diagBtn").disabled = true;
+  box.innerHTML = loadingHtml("Test ediliyor…");
+  try {
+    const rows = await diagnoseProvider();
+    const allOk = rows.every((r) => r.ok);
+    box.innerHTML = `
+      <ul class="diag">${rows.map((r) => `<li class="${r.ok ? "ok" : "bad"}"><b>${r.ok ? "✓" : "✗"} ${esc(r.label)}</b><span>${esc(r.detail)}</span></li>`).join("")}</ul>
+      <p class="hint">${allOk ? "Her şey çalışıyor." : "Sorun devam ederse bu ekranın görüntüsünü paylaş."}</p>`;
+  } finally {
+    $("diagBtn").disabled = false;
+  }
 }
 
 export function openProfile(section) {
@@ -210,13 +238,8 @@ export function initProfile() {
     };
   });
 
-  $("exportBtn").onclick = () => {
-    const blob = new Blob([JSON.stringify(exportAll(), null, 1)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `kalori-${dayKey()}.json`;
-    a.click();
-  };
+  $("exportBtn").onclick = async () => { if (await backupNow()) renderBackupInfo(); };
+  $("diagBtn").onclick = runDiagnose;
 
   $("importInput").addEventListener("change", async (e) => {
     const file = e.target.files[0];

@@ -4,7 +4,7 @@ import { toast } from "./util.js";
 // Sitedeki bu dosyalardan biri değişirse yeni sürüm çıkmış demektir.
 const FILES = [
   "./", "styles.css", "sw.js", "manifest.json",
-  "app.js", "nav.js", "store.js", "db.js", "util.js", "ai.js", "prompt.js", "gemini.js", "claude.js", "today.js", "meal.js", "history.js", "charts.js", "suggest.js", "profile.js", "barcode.js", "onboarding.js", "update.js",
+  "app.js", "nav.js", "store.js", "db.js", "util.js", "ai.js", "prompt.js", "gemini.js", "claude.js", "today.js", "meal.js", "history.js", "charts.js", "suggest.js", "profile.js", "barcode.js", "onboarding.js", "update.js", "backup.js", "offline.js",
 ];
 const CHECK_EVERY_MS = 2 * 60 * 1000;
 

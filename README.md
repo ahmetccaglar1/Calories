@@ -19,6 +19,9 @@ tahmini günceller ve günlük loga ekler. Günlük kalori hedefine ulaştığı
 - 🛑 %85'te "az kaldı", %100'de "bugünlük yemek bitti" uyarısı
 - ✨ İlk açılışta 4 adımlı kurulum sihirbazı
 - 🔄 Yeni sürüm yayınlanınca otomatik yenilenir; yukarıdan aşağı çekerek de yenilenir
+- 🩺 Profil'de bağlantı testi: anahtar ve modeller, gecikme ve Google'ın gerçek hata mesajı
+- 💾 Haftalık yedek hatırlatması; yedek paylaş menüsüyle Dosyalar / iCloud Drive'a kaydedilir
+- 📶 Çevrimdışı çekilen fotoğraflar saklanır, internet gelince analiz edilir
 - 📱 iPhone Safari'de "Ana Ekrana Ekle" ile uygulama gibi çalışır; veriler sadece cihazda (IndexedDB)
 
 ## Kurulum
@@ -46,13 +49,16 @@ Derleme adımı yok; tarayıcı ES modüllerini doğrudan yükler.
 - `meal.js` — öğün ekleme, analiz, düzenleme · `barcode.js` — barkod + Open Food Facts · `onboarding.js` — kurulum sihirbazı
 - `store.js` — veriler, hedef hesapları, eski sürümden geçiş · `db.js` — IndexedDB
 - `ai.js` — sağlayıcıdan bağımsız sohbet · `prompt.js` — talimatlar ve JSON şemaları · `gemini.js` / `claude.js` — sağlayıcılar
-- `update.js` — otomatik güncelleme ve aşağı çekerek yenileme · `sw.js`, `manifest.json` — PWA
+- `update.js` — otomatik güncelleme ve aşağı çekerek yenileme · `sw.js`, `manifest.json`, `kalori-icon-*.png` — PWA
+- `backup.js` — yedekleme (paylaş menüsü) · `offline.js` — çevrimdışı bekleyen fotoğraflar ve hatırlatma kartları
 - `vendor/zxing.js` — barkod okuma kütüphanesi (ZXing, MIT/Apache-2.0)
 
 ## Test
 ```
 npm install
-npx playwright install chromium
-npm test            # SCREENSHOTS=1 npm test ekran görüntülerini tests/screenshots/ altına kaydeder
+npx playwright install chromium webkit
+npm test                  # Chromium
+BROWSER=webkit npm test   # Safari motoru (WebKit)
+# SCREENSHOTS=1 ekran görüntülerini tests/screenshots/ altına kaydeder
 ```
-Test, uygulamayı `/Calories/` altında sunar; Gemini ve Open Food Facts taklit edilir. GitHub Actions her push ve PR'da çalıştırır.
+Test, uygulamayı `/Calories/` altında sunar; Gemini ve Open Food Facts taklit edilir. GitHub Actions her push ve PR'da Chromium ve WebKit'te çalıştırır.

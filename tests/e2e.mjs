@@ -1,7 +1,7 @@
 // Uçtan uca test: uygulamayı /Calories/ altında sunar, Gemini ve Open Food Facts'i taklit eder,
 // ana akışları gerçek bir tarayıcıda (Chromium, mobil görünüm) çalıştırır.
-// Çalıştırma: npm test   (ekran görüntüleri için: SCREENSHOTS=1 npm test)
-import { chromium } from "playwright";
+// Çalıştırma: npm test   (ekran görüntüleri için: SCREENSHOTS=1, Safari motoru için: BROWSER=webkit)
+import { chromium, webkit } from "playwright";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,10 +33,17 @@ const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursiv
 // 1x1'den büyük, geçerli bir JPEG üret (fotoğraf yerine)
 const PHOTO = path.join(ROOT, "tests", "food.jpg");
 
+// Taklit yanıtlar başka kökenden (googleapis, openfoodfacts) geliyor: CORS başlıkları şart.
+// Chromium bunları kendiliğinden ekliyor, WebKit eklemiyor; OPTIONS ön isteğine de cevap verilmeli.
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
+const fulfill = (route, { headers, ...opts }) => route.fulfill({ ...opts, headers: { ...CORS, ...headers } });
+const preflight = (route) => (route.request().method() === "OPTIONS" ? (route.fulfill({ status: 204, headers: CORS }), true) : false);
+
 // ---------- Taklit Gemini ----------
 const gemini = { requests: [] };
 function geminiReply(body) {
-  const sys = body.systemInstruction.parts[0].text;
+  const sys = body.systemInstruction?.parts[0].text ?? "";
+  if (!sys) return "OK"; // bağlantı testi gibi talimatsız istekler
   const user = body.contents.at(-1).parts.map((p) => p.text ?? "[görsel]").join(" ");
   gemini.requests.push({ kind: sys.startsWith("Sen klinik") ? "profile" : sys.startsWith("Sen pratik") ? "suggest" : "meal", sys, user, body });
   if (sys.startsWith("Sen klinik")) {
@@ -53,6 +60,7 @@ function geminiReply(body) {
 
 async function setupRoutes(ctx) {
   await ctx.route("https://generativelanguage.googleapis.com/**", async (route) => {
+    if (preflight(route)) return;
     const req = route.request();
     const out = JSON.stringify(geminiReply(JSON.parse(req.postData())));
     if (req.url().includes("streamGenerateContent")) {
@@ -60,24 +68,41 @@ async function setupRoutes(ctx) {
       const third = Math.ceil(out.length / 3);
       const chunks = [0, 1, 2].map((i) => out.slice(i * third, (i + 1) * third));
       const body = chunks.map((c, i) => `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: c }] }, ...(i === 2 ? { finishReason: "STOP" } : {}) }] })}\n\n`).join("");
-      return route.fulfill({ contentType: "text/event-stream", body });
+      return fulfill(route, { contentType: "text/event-stream", body });
     }
-    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: out }] } }] }) });
+    return fulfill(route, { contentType: "application/json", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: out }] } }] }) });
   });
-  await ctx.route("https://world.openfoodfacts.org/**", (route) => route.fulfill({
+  await ctx.route("https://world.openfoodfacts.org/**", (route) => preflight(route) || fulfill(route, {
     contentType: "application/json",
     body: JSON.stringify({ status: 1, product: { product_name: "Süzme Yoğurt", brands: "Örnek", serving_quantity: 150, nutriments: { "energy-kcal_100g": 100, proteins_100g: 10, carbohydrates_100g: 4, fat_100g: 5, fiber_100g: 0, sugars_100g: 4 } } }),
   }));
 }
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const ENGINE = process.env.BROWSER === "webkit" ? "webkit" : "chromium";
+console.log(`Tarayıcı motoru: ${ENGINE}\n`);
+const browser = ENGINE === "webkit"
+  ? await webkit.launch()
+  : await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+let skipped = 0;
+const skip = (msg, why) => { console.log(`– ${msg} (atlandı: ${why})`); skipped++; };
+// Bu motor sayfa içinden dokunma olayı (Touch/TouchEvent) oluşturabiliyor mu?
+const canSynthTouch = (page) => page.evaluate(() => {
+  try { new TouchEvent("touchstart", { touches: [new Touch({ identifier: 1, target: document.body, clientX: 1, clientY: 1 })] }); return true; } catch { return false; }
+});
 const errors = [];
 async function newPage(ctx) {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
+  if (ENGINE !== "chromium" || process.env.DEBUG) {
+    // Teşhis için: konsol hataları ve başarısız istekler
+    page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") console.log(`  [konsol ${m.type()}] ${m.text()}`); });
+    page.on("requestfailed", (r) => console.log(`  [istek başarısız] ${r.method()} ${r.url().slice(0, 100)} → ${r.failure()?.errorText}`));
+  }
   return page;
 }
-const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true };
+// Service worker'ın aracılık ettiği istekleri Playwright taklit edemiyor (WebKit buna sayfanın kendi API
+// isteklerini de dahil ediyor). Ağ taklidi yapılan bağlamlarda SW kapalı; SW ayrıca kendi testinde sınanıyor.
+const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: "block" };
 
 try {
   // ================= Yeni kullanıcı =================
@@ -141,6 +166,9 @@ try {
   await shot(page, "05-today");
 
   // --- Kaydırarak silme + geri al ---
+  const touchOk = await canSynthTouch(page);
+  if (!touchOk) skip("sola kaydırınca siliniyor / geri al", `${ENGINE} sayfa içinden dokunma olayı oluşturamıyor`);
+  else {
   await page.evaluate(() => {
     const row = document.querySelectorAll(".meal")[1];
     const t = (x) => new Touch({ identifier: 1, target: row, clientX: x, clientY: 300 });
@@ -153,6 +181,7 @@ try {
   await page.click("#toast button");
   await page.waitForFunction(() => document.querySelectorAll(".meal").length === 2);
   ok(true, "geri al ile geri geliyor");
+  }
 
   // --- Su ---
   await page.click("#waterPlus"); await page.click("#waterPlus");
@@ -231,6 +260,8 @@ try {
   ok(loads > 0, "yeni sürüm algılanınca otomatik yenileniyor");
   const before = loads;
   await page.waitForSelector(".meal");
+  if (!touchOk) skip("aşağı çekince yenileniyor", `${ENGINE} sayfa içinden dokunma olayı oluşturamıyor`);
+  else {
   await page.evaluate(() => {
     window.scrollTo(0, 0);
     const t = (y) => new Touch({ identifier: 1, target: document.body, clientX: 100, clientY: y });
@@ -240,7 +271,127 @@ try {
   });
   await page.waitForTimeout(2000);
   ok(loads > before, "aşağı çekince yenileniyor");
+  }
   await ctx.close();
+
+  // ================= Bağlantı testi, yedek, çevrimdışı, ikonlar =================
+  {
+    const c = await browser.newContext({ ...mobile, acceptDownloads: true });
+    await setupRoutes(c);
+    await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      if (preflight(route)) return;
+      const req = route.request();
+      if (req.method() === "GET") return fulfill(route, { contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-9-flash" }, { name: "models/gemini-9-flash-lite" }] }) });
+      const body = JSON.parse(req.postData());
+      if (!body.systemInstruction && req.url().includes("flash-latest") && !req.url().includes("lite"))
+        return fulfill(route, { status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "The model is overloaded." } }) });
+      return route.fallback();
+    });
+    await c.addInitScript(() => {
+      if (localStorage.getItem("kalori.settings")) return;
+      localStorage.setItem("kalori.settings", JSON.stringify({ onboarded: true, geminiKey: "AIzaX", dataVersion: 2 }));
+    });
+    const p = await newPage(c);
+    await p.goto(BASE);
+    await p.waitForSelector("#view-today");
+
+    // --- Bağlantı testi ---
+    await p.click(".tabbar [data-tab='profile']");
+    await p.click("#diagBtn");
+    await p.waitForSelector(".diag");
+    const diag = await p.$$eval(".diag li", (els) => els.map((e) => ({ cls: e.className, text: e.textContent })));
+    ok(diag.length === 3 && diag[0].cls === "ok" && diag[1].cls === "ok" && diag[2].cls === "bad" && diag[2].text.includes("503"),
+      "bağlantı testi anahtarı ve iki modeli ayrı ayrı gösteriyor, hatayı koduyla veriyor");
+    await shot(p, "10-diagnose");
+
+    // --- Çevrimdışı fotoğraf → bekleyen ---
+    await p.click(".tabbar [data-tab='today']");
+    // Çevrimdışını uygulama düzeyinde taklit et: Playwright'ın ağ kesme emülasyonu WebKit'te yerel blob:
+    // görsellerini de engelliyor (gerçek Safari engellemez), bu yüzden onLine bayrağı + olaylar + API isteği kesme.
+    const setOnline = (on) => p.evaluate((v) => {
+      Object.defineProperty(navigator, "onLine", { configurable: true, get: () => v });
+      window.dispatchEvent(new Event(v ? "online" : "offline"));
+    }, on);
+    await p.route("https://generativelanguage.googleapis.com/**", (route) => route.abort());
+    await setOnline(false);
+    await p.click("#addBtn");
+    await p.setInputFiles("#galleryInput", PHOTO);
+    await p.waitForSelector("#pendingGo");
+    ok(await p.$eval("#pendingGo", (b) => b.disabled), "çevrimdışı çekilen fotoğraf bekleyenlere ekleniyor (buton pasif)");
+    await p.unroute("https://generativelanguage.googleapis.com/**");
+    await setOnline(true);
+    await p.waitForFunction(() => !document.getElementById("pendingGo").disabled);
+    ok(true, "internet gelince bekleyen analiz etkinleşiyor");
+    await shot(p, "11-pending");
+    await p.click("#pendingGo");
+    await p.waitForSelector("#analyzeDialog[open]");
+    ok(!(await p.$eval("#previewImg", (i) => i.classList.contains("hidden"))), "bekleyen fotoğraf analiz penceresinde açılıyor");
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector("#kcalEdit");
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector(".meal");
+    ok(await p.evaluate(async () => (await import("./store.js")).data.pending.length === 0) && !(await p.$("#pendingGo")),
+      "analiz edilip kaydedilince bekleyenlerden çıkıyor");
+
+    // --- Bağlantı hatasında "Sonra analiz et" ---
+    await p.route("https://generativelanguage.googleapis.com/**", (route) => route.abort());
+    await p.click("#addBtn");
+    await p.setInputFiles("#galleryInput", PHOTO);
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector("#analysisArea .error");
+    const later = await p.$$eval("#analyzeActions .btn", (bs) => bs.map((b) => b.textContent));
+    ok(later.includes("Sonra analiz et"), "bağlantı hatasında 'Sonra analiz et' sunuluyor");
+    await p.click("#analyzeActions .btn:last-child");
+    await p.waitForSelector("#pendingGo");
+    ok(await p.evaluate(async () => (await import("./store.js")).data.pending.length === 1), "'Sonra analiz et' fotoğrafı bekleyenlere koyuyor");
+    await p.unroute("https://generativelanguage.googleapis.com/**");
+
+    // --- Yedek hatırlatması ---
+    await p.waitForSelector("#backupGo");
+    ok(true, "kayıt varken yedek hatırlatması görünüyor");
+    const [download] = await Promise.all([p.waitForEvent("download"), p.click("#backupGo")]);
+    const file = await download.path();
+    const backup = JSON.parse(fs.readFileSync(file, "utf8"));
+    ok(backup.meals?.length === 1 && !backup.pending && !backup.settings.geminiKey, "yedek dosyası öğünleri içeriyor; anahtar ve bekleyen fotoğraflar hariç");
+    await p.waitForFunction(() => !document.getElementById("backupGo"));
+    ok(true, "yedek alınınca hatırlatma kayboluyor");
+    await c.close();
+  }
+
+  // --- İkon dosyaları ---
+  {
+    const c = await browser.newContext({ serviceWorkers: "block" });
+    const p = await c.newPage();
+    await p.goto(BASE);
+    const touchIcon = await p.$eval("link[rel='apple-touch-icon']", (l) => l.href);
+    const man = await (await p.request.get(new URL("manifest.json", BASE).href)).json();
+    const urls = [touchIcon, ...man.icons.map((i) => new URL(i.src, BASE).href)];
+    const results = await Promise.all(urls.map(async (u) => {
+      const r = await p.request.get(u);
+      const b = await r.body();
+      // PNG imzası ve IHDR'den genişlik
+      return r.ok() && b.slice(1, 4).toString() === "PNG" ? b.readUInt32BE(16) : 0;
+    }));
+    ok(results.every(Boolean) && results[0] === 180 && !touchIcon.includes("?"), `ana ekran ikonu ve manifest ikonları geçerli PNG (${results.join(", ")} px)`);
+    await c.close();
+  }
+
+  // --- Service worker: kaydoluyor ve uygulama dosyalarını önbelleğe alıyor ---
+  {
+    const c = await browser.newContext({ serviceWorkers: "allow" });
+    const p = await newPage(c);
+    await p.goto(BASE);
+    const sw = await p.evaluate(async () => {
+      const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 10000))]);
+      if (!reg) return null;
+      const keys = await caches.keys();
+      const cached = keys.length ? (await (await caches.open(keys[0])).keys()).map((r) => new URL(r.url).pathname) : [];
+      return { active: !!reg.active, cached };
+    });
+    ok(sw?.active && sw.cached.some((u) => u.endsWith("/app.js")) && sw.cached.some((u) => u.endsWith("/kalori-icon-180.png")),
+      `service worker etkin ve uygulama dosyalarını önbelleğe alıyor (${sw?.cached.length ?? 0} dosya)`);
+    await c.close();
+  }
 
   // ================= Eski sürümden geçiş =================
   const ctx2 = await browser.newContext(mobile);
@@ -266,6 +417,7 @@ try {
     const calls = [];
     // Sonradan eklenen route önceliklidir; eşleşmeyen istekler genel taklide düşer
     await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      if (preflight(route)) return;
       const url = route.request().url();
       const body = JSON.parse(route.request().postData() || "{}");
       calls.push({ model: url.match(/models\/([^:]+)/)?.[1], strict: !!body.generationConfig?.responseSchema });
@@ -283,7 +435,7 @@ try {
     await c.close();
     return result;
   }
-  const fail = (status, message) => (route) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: { message } }) });
+  const fail = (status, message) => (route) => preflight(route) || fulfill(route, { status, contentType: "application/json", body: JSON.stringify({ error: { message } }) });
 
   let r = await analyzeWith((route, call) => (call.model.includes("lite") ? fail(503, "The model is overloaded.")(route) : null));
   ok(!r.error && r.calls.filter((c) => c.model.includes("lite")).length === 3 && r.calls.some((c) => !c.model.includes("lite")),
@@ -304,5 +456,5 @@ try {
   server.close();
 }
 
-console.log(failures ? `\n${failures} test başarısız` : "\nTüm testler geçti");
+console.log(`${skipped ? `\n${skipped} test bu motorda atlandı` : ""}${failures ? `\n${failures} test başarısız` : "\nTüm testler geçti"}`);
 process.exit(failures ? 1 : 0);

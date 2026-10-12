@@ -34,7 +34,7 @@ function render() {
   const act = $("obActions");
   if (step === 0) {
     box.innerHTML = `
-      <img src="apple-touch-icon.png" class="ob-logo" alt="">
+      <img src="kalori-icon-180.png" class="ob-logo" alt="">
       <h2>Kalori Günlüğü</h2>
       <p class="lead">Yediğinin fotoğrafını çek, gerisini yapay zeka halletsin.</p>
       <ul class="ob-list">
