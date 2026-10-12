@@ -1,5 +1,5 @@
 // Giriş noktası: verileri yükler, görünümleri ve akışları başlatır.
-import { initStore, settings, dayKey } from "./store.js";
+import { initStore, settings, dayKey, requestPersistence } from "./store.js";
 import { nav, showTab, rerender } from "./nav.js";
 import { initToday } from "./today.js";
 import { initHistory } from "./history.js";
@@ -8,6 +8,7 @@ import { initProfile } from "./profile.js";
 import { initMeal, mealBusy } from "./meal.js";
 import { initBarcode } from "./barcode.js";
 import { initOnboarding, startOnboarding } from "./onboarding.js";
+import { initOffline } from "./offline.js";
 import { initAutoUpdate, initPullToRefresh } from "./update.js";
 
 await initStore();
@@ -30,6 +31,8 @@ initProfile();
 initMeal();
 initBarcode();
 initOnboarding();
+initOffline();
+requestPersistence();
 
 const anyDialogOpen = () => [...document.querySelectorAll("dialog")].some((d) => d.open);
 const busy = () => mealBusy() || anyDialogOpen();

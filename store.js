@@ -28,6 +28,8 @@ export const settings = {
   claudeKey: "",
   speed: "fast",       // fast: öğün analizinde hızlı model, balanced: standart model
   onboarded: false,
+  lastBackup: null,    // son yedeğin tarihi (YYYY-MM-DD)
+  backupSnoozed: null, // "sonra" dendiği gün
   dataVersion: 1,
   ...stored,
   profile: { ...DEFAULT_PROFILE, ...(stored.profile ?? {}) },
@@ -43,7 +45,7 @@ export function saveSettings() {
 // ---------- Koleksiyonlar ----------
 
 let db = null;
-export const data = { meals: [], weights: [], water: [], favorites: [], suggested: [] };
+export const data = { meals: [], weights: [], water: [], favorites: [], suggested: [], pending: [] };
 
 const persist = (p) => p.catch(() => alert("Kayıt yapılamadı: cihaz depolaması dolu olabilir. Eski verileri dışa aktarıp temizlemeyi dene."));
 
@@ -177,6 +179,35 @@ export function rememberSuggestions(titles) {
 }
 export const recentSuggestions = () => data.suggested.map((s) => s.title);
 
+// ---------- Bekleyen analizler (çevrimdışı çekilen fotoğraflar) ----------
+
+export function addPending(item) {
+  const p = { id: crypto.randomUUID(), createdAt: Date.now(), ...item };
+  upsert("pending", p);
+  return p;
+}
+export const removePending = (id) => remove("pending", id);
+export const pendingSorted = () => [...data.pending].sort((a, b) => a.createdAt - b.createdAt);
+
+// ---------- Yedekleme ----------
+
+const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+
+/** Yedek hatırlatması gösterilsin mi: kayıt var, son yedek 7 günden eski ve bugün ertelenmemiş. */
+export function backupDue() {
+  if (!data.meals.length) return false;
+  const today = dayKey();
+  if (settings.backupSnoozed && daysBetween(settings.backupSnoozed, today) < 3) return false;
+  return !settings.lastBackup || daysBetween(settings.lastBackup, today) >= 7;
+}
+export function markBackedUp() { settings.lastBackup = dayKey(); settings.backupSnoozed = null; saveSettings(); }
+export function snoozeBackup() { settings.backupSnoozed = dayKey(); saveSettings(); }
+
+/** Tarayıcıdan verilerin kendiliğinden silinmemesini ister (destekleniyorsa). */
+export async function requestPersistence() {
+  try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch {}
+}
+
 // ---------- Hedefler ----------
 
 /** Kalori ve kiloya göre varsayılan makro dağılımı (gram). */
@@ -204,13 +235,15 @@ export const activeKey = () => (settings.provider === "claude" ? settings.claude
 
 export function exportAll() {
   const { geminiKey, claudeKey, ...safe } = settings; // anahtarlar dışa aktarılmaz
-  return { version: DATA_VERSION, settings: safe, ...data };
+  const { pending, ...rest } = data; // bekleyen ham fotoğraflar yedeğe girmez
+  return { version: DATA_VERSION, settings: safe, ...rest };
 }
 
 export async function importAll(obj) {
   const meals = Array.isArray(obj.meals) ? obj.meals : null;
   if (!meals) throw new Error("invalid");
   for (const s of Object.keys(data)) {
+    if (s === "pending") continue;
     const list = s === "meals" ? meals.map(migrateMeal) : Array.isArray(obj[s]) ? obj[s] : [];
     await db.clear(s);
     if (list.length) await db.putMany(s, list);

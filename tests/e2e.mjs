@@ -1,7 +1,7 @@
 // Uçtan uca test: uygulamayı /Calories/ altında sunar, Gemini ve Open Food Facts'i taklit eder,
 // ana akışları gerçek bir tarayıcıda (Chromium, mobil görünüm) çalıştırır.
-// Çalıştırma: npm test   (ekran görüntüleri için: SCREENSHOTS=1 npm test)
-import { chromium } from "playwright";
+// Çalıştırma: npm test   (ekran görüntüleri için: SCREENSHOTS=1, Safari motoru için: BROWSER=webkit)
+import { chromium, webkit } from "playwright";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -36,7 +36,8 @@ const PHOTO = path.join(ROOT, "tests", "food.jpg");
 // ---------- Taklit Gemini ----------
 const gemini = { requests: [] };
 function geminiReply(body) {
-  const sys = body.systemInstruction.parts[0].text;
+  const sys = body.systemInstruction?.parts[0].text ?? "";
+  if (!sys) return "OK"; // bağlantı testi gibi talimatsız istekler
   const user = body.contents.at(-1).parts.map((p) => p.text ?? "[görsel]").join(" ");
   gemini.requests.push({ kind: sys.startsWith("Sen klinik") ? "profile" : sys.startsWith("Sen pratik") ? "suggest" : "meal", sys, user, body });
   if (sys.startsWith("Sen klinik")) {
@@ -70,7 +71,17 @@ async function setupRoutes(ctx) {
   }));
 }
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const ENGINE = process.env.BROWSER === "webkit" ? "webkit" : "chromium";
+console.log(`Tarayıcı motoru: ${ENGINE}\n`);
+const browser = ENGINE === "webkit"
+  ? await webkit.launch()
+  : await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+let skipped = 0;
+const skip = (msg, why) => { console.log(`– ${msg} (atlandı: ${why})`); skipped++; };
+// Bu motor sayfa içinden dokunma olayı (Touch/TouchEvent) oluşturabiliyor mu?
+const canSynthTouch = (page) => page.evaluate(() => {
+  try { new TouchEvent("touchstart", { touches: [new Touch({ identifier: 1, target: document.body, clientX: 1, clientY: 1 })] }); return true; } catch { return false; }
+});
 const errors = [];
 async function newPage(ctx) {
   const page = await ctx.newPage();
@@ -141,6 +152,9 @@ try {
   await shot(page, "05-today");
 
   // --- Kaydırarak silme + geri al ---
+  const touchOk = await canSynthTouch(page);
+  if (!touchOk) skip("sola kaydırınca siliniyor / geri al", `${ENGINE} sayfa içinden dokunma olayı oluşturamıyor`);
+  else {
   await page.evaluate(() => {
     const row = document.querySelectorAll(".meal")[1];
     const t = (x) => new Touch({ identifier: 1, target: row, clientX: x, clientY: 300 });
@@ -153,6 +167,7 @@ try {
   await page.click("#toast button");
   await page.waitForFunction(() => document.querySelectorAll(".meal").length === 2);
   ok(true, "geri al ile geri geliyor");
+  }
 
   // --- Su ---
   await page.click("#waterPlus"); await page.click("#waterPlus");
@@ -231,6 +246,8 @@ try {
   ok(loads > 0, "yeni sürüm algılanınca otomatik yenileniyor");
   const before = loads;
   await page.waitForSelector(".meal");
+  if (!touchOk) skip("aşağı çekince yenileniyor", `${ENGINE} sayfa içinden dokunma olayı oluşturamıyor`);
+  else {
   await page.evaluate(() => {
     window.scrollTo(0, 0);
     const t = (y) => new Touch({ identifier: 1, target: document.body, clientX: 100, clientY: y });
@@ -240,7 +257,101 @@ try {
   });
   await page.waitForTimeout(2000);
   ok(loads > before, "aşağı çekince yenileniyor");
+  }
   await ctx.close();
+
+  // ================= Bağlantı testi, yedek, çevrimdışı, ikonlar =================
+  {
+    const c = await browser.newContext({ ...mobile, acceptDownloads: true });
+    await setupRoutes(c);
+    await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      const req = route.request();
+      if (req.method() === "GET") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-9-flash" }, { name: "models/gemini-9-flash-lite" }] }) });
+      const body = JSON.parse(req.postData());
+      if (!body.systemInstruction && req.url().includes("flash-latest") && !req.url().includes("lite"))
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "The model is overloaded." } }) });
+      return route.fallback();
+    });
+    await c.addInitScript(() => {
+      if (localStorage.getItem("kalori.settings")) return;
+      localStorage.setItem("kalori.settings", JSON.stringify({ onboarded: true, geminiKey: "AIzaX", dataVersion: 2 }));
+    });
+    const p = await newPage(c);
+    await p.goto(BASE);
+    await p.waitForSelector("#view-today");
+
+    // --- Bağlantı testi ---
+    await p.click(".tabbar [data-tab='profile']");
+    await p.click("#diagBtn");
+    await p.waitForSelector(".diag");
+    const diag = await p.$$eval(".diag li", (els) => els.map((e) => ({ cls: e.className, text: e.textContent })));
+    ok(diag.length === 3 && diag[0].cls === "ok" && diag[1].cls === "ok" && diag[2].cls === "bad" && diag[2].text.includes("503"),
+      "bağlantı testi anahtarı ve iki modeli ayrı ayrı gösteriyor, hatayı koduyla veriyor");
+    await shot(p, "10-diagnose");
+
+    // --- Çevrimdışı fotoğraf → bekleyen ---
+    await p.click(".tabbar [data-tab='today']");
+    await c.setOffline(true);
+    await p.click("#addBtn");
+    await p.setInputFiles("#galleryInput", PHOTO);
+    await p.waitForSelector("#pendingGo");
+    ok(await p.$eval("#pendingGo", (b) => b.disabled), "çevrimdışı çekilen fotoğraf bekleyenlere ekleniyor (buton pasif)");
+    await c.setOffline(false);
+    await p.waitForFunction(() => !document.getElementById("pendingGo").disabled);
+    ok(true, "internet gelince bekleyen analiz etkinleşiyor");
+    await shot(p, "11-pending");
+    await p.click("#pendingGo");
+    await p.waitForSelector("#analyzeDialog[open]");
+    ok(!(await p.$eval("#previewImg", (i) => i.classList.contains("hidden"))), "bekleyen fotoğraf analiz penceresinde açılıyor");
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector("#kcalEdit");
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector(".meal");
+    ok(await p.evaluate(async () => (await import("./store.js")).data.pending.length === 0) && !(await p.$("#pendingGo")),
+      "analiz edilip kaydedilince bekleyenlerden çıkıyor");
+
+    // --- Bağlantı hatasında "Sonra analiz et" ---
+    await p.route("https://generativelanguage.googleapis.com/**", (route) => route.abort());
+    await p.click("#addBtn");
+    await p.setInputFiles("#galleryInput", PHOTO);
+    await p.click("#analyzeActions .btn");
+    await p.waitForSelector("#analysisArea .error");
+    const later = await p.$$eval("#analyzeActions .btn", (bs) => bs.map((b) => b.textContent));
+    ok(later.includes("Sonra analiz et"), "bağlantı hatasında 'Sonra analiz et' sunuluyor");
+    await p.click("#analyzeActions .btn:last-child");
+    await p.waitForSelector("#pendingGo");
+    ok(await p.evaluate(async () => (await import("./store.js")).data.pending.length === 1), "'Sonra analiz et' fotoğrafı bekleyenlere koyuyor");
+    await p.unroute("https://generativelanguage.googleapis.com/**");
+
+    // --- Yedek hatırlatması ---
+    await p.waitForSelector("#backupGo");
+    ok(true, "kayıt varken yedek hatırlatması görünüyor");
+    const [download] = await Promise.all([p.waitForEvent("download"), p.click("#backupGo")]);
+    const file = await download.path();
+    const backup = JSON.parse(fs.readFileSync(file, "utf8"));
+    ok(backup.meals?.length === 1 && !backup.pending && !backup.settings.geminiKey, "yedek dosyası öğünleri içeriyor; anahtar ve bekleyen fotoğraflar hariç");
+    await p.waitForFunction(() => !document.getElementById("backupGo"));
+    ok(true, "yedek alınınca hatırlatma kayboluyor");
+    await c.close();
+  }
+
+  // --- İkon dosyaları ---
+  {
+    const c = await browser.newContext();
+    const p = await c.newPage();
+    await p.goto(BASE);
+    const touchIcon = await p.$eval("link[rel='apple-touch-icon']", (l) => l.href);
+    const man = await (await p.request.get(new URL("manifest.json", BASE).href)).json();
+    const urls = [touchIcon, ...man.icons.map((i) => new URL(i.src, BASE).href)];
+    const results = await Promise.all(urls.map(async (u) => {
+      const r = await p.request.get(u);
+      const b = await r.body();
+      // PNG imzası ve IHDR'den genişlik
+      return r.ok() && b.slice(1, 4).toString() === "PNG" ? b.readUInt32BE(16) : 0;
+    }));
+    ok(results.every(Boolean) && results[0] === 180 && !touchIcon.includes("?"), `ana ekran ikonu ve manifest ikonları geçerli PNG (${results.join(", ")} px)`);
+    await c.close();
+  }
 
   // ================= Eski sürümden geçiş =================
   const ctx2 = await browser.newContext(mobile);
@@ -304,5 +415,5 @@ try {
   server.close();
 }
 
-console.log(failures ? `\n${failures} test başarısız` : "\nTüm testler geçti");
+console.log(`${skipped ? `\n${skipped} test bu motorda atlandı` : ""}${failures ? `\n${failures} test başarısız` : "\nTüm testler geçti"}`);
 process.exit(failures ? 1 : 0);

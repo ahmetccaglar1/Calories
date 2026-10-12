@@ -46,7 +46,7 @@ export async function complete({ apiKey, system, turns, schema, onText }) {
     if (err instanceof Anthropic.AuthenticationError) throw new AiError("API anahtarı geçersiz. Ayarlardan kontrol et.");
     if (err instanceof Anthropic.PermissionDeniedError) throw new AiError("Bu API anahtarının modele erişim izni yok.");
     if (err instanceof Anthropic.RateLimitError) throw new AiError("Çok fazla istek. Biraz bekleyip tekrar dene.");
-    if (err instanceof Anthropic.APIConnectionError) throw new AiError("Bağlantı kurulamadı. İnterneti kontrol et.");
+    if (err instanceof Anthropic.APIConnectionError) throw new AiError("Bağlantı kurulamadı. İnterneti kontrol et.", "offline");
     if (err instanceof Anthropic.APIError) throw new AiError(`API hatası (${err.status ?? "?"}): ${err.message}`);
     throw err;
   }
@@ -56,4 +56,15 @@ export async function complete({ apiKey, system, turns, schema, onText }) {
 
   const text = response.content.filter((b) => b.type === "text").pop()?.text ?? "";
   return { text, turn: { role: "assistant", content: response.content } };
+}
+
+/** Bağlantı testi: modele küçük bir istek. */
+export async function diagnose(apiKey) {
+  const t0 = performance.now();
+  try {
+    const r = await getClient(apiKey).messages.create({ model: MODEL, max_tokens: 64, messages: [{ role: "user", content: "Sadece OK yaz." }] });
+    return [{ label: "Claude", ok: true, detail: `${r.model} · ${Math.round(performance.now() - t0)} ms` }];
+  } catch (err) {
+    return [{ label: "Claude", ok: false, detail: err instanceof Anthropic.APIError ? `${err.status ?? "?"}: ${err.message}` : `bağlantı hatası (${err.message})` }];
+  }
 }

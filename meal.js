@@ -2,13 +2,14 @@
 import { $, esc, fmt, setButtons, loadingHtml, loadImage, resize, squareThumb, toast, haptic } from "./util.js";
 import {
   settings, activeKey, dayKey, totalsFor, macroTargets, MEAL_TYPES, mealTypeFor,
-  addMeal, updateMeal, deleteMeal, restoreMeal, recentMeals, isFavorite, toggleFavorite, data,
+  addMeal, updateMeal, deleteMeal, restoreMeal, recentMeals, isFavorite, toggleFavorite, data, addPending, nowTime,
 } from "./store.js";
 import { Chat } from "./ai.js";
 import { mealSystem, MEAL_SCHEMA, normalizeMeal, mealFirstPrompt, mealAnswersPrompt, profileContext } from "./prompt.js";
 import { nav, rerender } from "./nav.js";
 import { statusFor } from "./today.js";
 import { openProfile } from "./profile.js";
+import { pendingDone } from "./offline.js";
 
 let session = null; // açık analiz: { chat, imageB64, thumb, result }
 export const mealBusy = () => !!session;
@@ -84,7 +85,8 @@ const dlg = $("analyzeDialog");
 const area = $("analysisArea");
 const actions = $("analyzeActions");
 
-function openAnalysis({ imageB64 = null, thumb = null, preview = null, note = "" }) {
+/** pending: çevrimdışıyken kaydedilmiş bekleyen fotoğraf (tarih/saat ondan alınır) */
+function openAnalysis({ imageB64 = null, thumb = null, preview = null, note = "", pending = null }) {
   addDlg.close();
   session = {
     chat: new Chat({
@@ -93,7 +95,7 @@ function openAnalysis({ imageB64 = null, thumb = null, preview = null, note = ""
       normalize: normalizeMeal,
       tier: settings.speed === "balanced" ? "standard" : "lite",
     }),
-    imageB64, thumb, result: null,
+    imageB64, thumb, pending, result: null,
   };
   $("mealNote").value = note;
   $("previewImg").classList.toggle("hidden", !preview);
@@ -105,9 +107,22 @@ function openAnalysis({ imageB64 = null, thumb = null, preview = null, note = ""
 }
 export { openAnalysis };
 
-function showError(msg, retry) {
-  area.innerHTML = `<div class="error">${esc(msg)}</div>`;
-  setButtons(actions, [{ label: "Tekrar dene", onClick: retry }]);
+function showError(err, retry) {
+  area.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+  const btns = [{ label: "Tekrar dene", onClick: retry }];
+  // Bağlantı yoksa fotoğrafı sakla, internet gelince analiz edilsin
+  if (session.imageB64 && !session.pending && (err.code === "offline" || !navigator.onLine)) {
+    btns.push({ label: "Sonra analiz et", cls: "ghost", onClick: () => { savePending(session.imageB64, session.thumb, $("mealNote").value.trim()); dlg.close(); } });
+  }
+  setButtons(actions, btns);
+}
+
+function savePending(imageB64, thumb, note) {
+  addDlg.close();
+  const today = nav.day === dayKey();
+  addPending({ date: nav.day, time: today ? nowTime() : "12:00", mealType: mealTypeFor(today ? nowTime() : "12"), imageB64, thumb, note });
+  rerender();
+  toast("Fotoğraf kaydedildi; internet gelince Bugün sekmesinden analiz edebilirsin.", { duration: 5000 });
 }
 
 async function runStart() {
@@ -125,7 +140,7 @@ async function runStart() {
     });
     if (session === s) showResult();
   } catch (err) {
-    if (session === s) showError(err.message, runStart);
+    if (session === s) showError(err, runStart);
   }
 }
 
@@ -137,7 +152,7 @@ async function runAnswers(answers) {
     s.result = await s.chat.send({ text: mealAnswersPrompt(answers) });
     if (session === s) showResult();
   } catch (err) {
-    if (session === s) showError(err.message, () => runAnswers(answers));
+    if (session === s) showError(err, () => runAnswers(answers));
   }
 }
 
@@ -220,9 +235,12 @@ function saveAnalyzed() {
     note: $("mealNote").value.trim(),
     healthNote: r.health_note,
     thumb: session.thumb,
-    mealType: mealTypeFor(nav.day === dayKey() ? new Date().toTimeString() : "12"),
-  }, nav.day);
+    mealType: session.pending?.mealType ?? mealTypeFor(nav.day === dayKey() ? nowTime() : "12"),
+    ...(session.pending ? { time: session.pending.time } : {}),
+  }, session.pending?.date ?? nav.day);
+  const pendingId = session.pending?.id;
   dlg.close();
+  if (pendingId) pendingDone(pendingId);
   afterAdd(meal);
 }
 
@@ -233,6 +251,7 @@ async function onPhoto(e) {
   try {
     const img = await loadImage(file);
     const dataUrl = resize(img, 1024, 0.8);
+    if (!navigator.onLine) { savePending(dataUrl.split(",")[1], squareThumb(img, 160), ""); return; }
     openAnalysis({ imageB64: dataUrl.split(",")[1], thumb: squareThumb(img, 160), preview: dataUrl });
   } catch {
     toast("Fotoğraf açılamadı.");

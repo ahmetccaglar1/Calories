@@ -4,6 +4,14 @@ import { settings, activeKey } from "./store.js";
 
 const loadProvider = () => (settings.provider === "claude" ? import("./claude.js") : import("./gemini.js"));
 
+/** Seçili sağlayıcı için bağlantı testi. */
+export async function diagnoseProvider() {
+  let provider;
+  try { provider = await loadProvider(); }
+  catch { return [{ label: "Modül", ok: false, detail: "Yapay zeka modülü yüklenemedi (internet?)" }]; }
+  return provider.diagnose(activeKey());
+}
+
 export class Chat {
   /**
    * @param {{system: string, schema: object, normalize: (r: any) => any, tier?: "lite"|"standard"}} opts
@@ -21,7 +29,7 @@ export class Chat {
   async send({ text, images = [], onText }) {
     let provider;
     try { provider = await loadProvider(); }
-    catch { throw new AiError("Yapay zeka modülü yüklenemedi. İnterneti kontrol et."); }
+    catch { throw new AiError("Yapay zeka modülü yüklenemedi. İnterneti kontrol et.", "offline"); }
 
     this.turns.push(provider.userTurn({ text, images }));
     let out;

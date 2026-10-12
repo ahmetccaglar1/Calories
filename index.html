@@ -8,9 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Kalori">
-  <link rel="apple-touch-icon" sizes="180x180" href="/Calories/apple-touch-icon.png?v=4">
-  <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/Calories/apple-touch-icon-precomposed.png?v=4">
-  <link rel="icon" type="image/png" sizes="192x192" href="/Calories/icons/app-icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/Calories/kalori-icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/Calories/kalori-icon-192.png">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
   <title>Kalori Günlüğü</title>
@@ -66,6 +65,7 @@
       </button>
     </div>
 
+    <div id="notices"></div>
     <div id="mealGroups"></div>
     <p class="empty" id="emptyMeals">Henüz bir şey eklemedin.<br>Aşağıdaki <b>+</b> ile yediğini ekle 📸</p>
   </section>
@@ -223,13 +223,16 @@
           <small class="hint">console.anthropic.com → API Keys. Kullanım başına ücretlendirilir.</small>
         </label>
         <small class="hint">Anahtar sadece bu cihazda saklanır.</small>
+        <button type="button" class="btn ghost small" id="diagBtn">🩺 Bağlantıyı test et</button>
+        <div id="diagResult"></div>
       </div>
 
       <div class="card">
         <h2>💾 Veri</h2>
+        <p class="hint" id="backupInfo"></p>
         <div class="sheet-actions">
-          <button type="button" class="btn ghost" id="exportBtn">Dışa aktar</button>
-          <label class="btn ghost" for="importInput">İçe aktar</label>
+          <button type="button" class="btn ghost" id="exportBtn">Yedekle</button>
+          <label class="btn ghost" for="importInput">Yedekten geri yükle</label>
           <input type="file" id="importInput" accept="application/json" hidden>
         </div>
         <button type="button" class="btn ghost small" id="rerunOnboarding">Kurulum sihirbazını yeniden aç</button>

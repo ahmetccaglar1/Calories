@@ -1,8 +1,8 @@
 // Küçük IndexedDB sarmalayıcısı. IndexedDB yoksa (bazı özel modlar) localStorage'a düşer.
 
 const DB_NAME = "kalori";
-const DB_VERSION = 1;
-export const STORES = ["meals", "weights", "water", "favorites", "suggested"];
+const DB_VERSION = 2;
+export const STORES = ["meals", "weights", "water", "favorites", "suggested", "pending"];
 
 function idbBackend() {
   const dbp = new Promise((resolve, reject) => {

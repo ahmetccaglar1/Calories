@@ -1,7 +1,10 @@
 // Yapay zeka görevlerinin (öğün analizi, yemek önerisi, profil/hedef hesaplama) talimatları ve çıktı şemaları.
 // Şemalar standart JSON Schema; Claude doğrudan kullanır, Gemini için gemini.js çevirir.
 
-export class AiError extends Error {}
+export class AiError extends Error {
+  /** @param {string} message  @param {"offline"|undefined} code */
+  constructor(message, code) { super(message); this.code = code; }
+}
 
 const num = { type: "number" };
 const str = { type: "string" };
