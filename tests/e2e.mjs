@@ -33,6 +33,12 @@ const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursiv
 // 1x1'den büyük, geçerli bir JPEG üret (fotoğraf yerine)
 const PHOTO = path.join(ROOT, "tests", "food.jpg");
 
+// Taklit yanıtlar başka kökenden (googleapis, openfoodfacts) geliyor: CORS başlıkları şart.
+// Chromium bunları kendiliğinden ekliyor, WebKit eklemiyor; OPTIONS ön isteğine de cevap verilmeli.
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
+const fulfill = (route, { headers, ...opts }) => route.fulfill({ ...opts, headers: { ...CORS, ...headers } });
+const preflight = (route) => (route.request().method() === "OPTIONS" ? (route.fulfill({ status: 204, headers: CORS }), true) : false);
+
 // ---------- Taklit Gemini ----------
 const gemini = { requests: [] };
 function geminiReply(body) {
@@ -54,6 +60,7 @@ function geminiReply(body) {
 
 async function setupRoutes(ctx) {
   await ctx.route("https://generativelanguage.googleapis.com/**", async (route) => {
+    if (preflight(route)) return;
     const req = route.request();
     const out = JSON.stringify(geminiReply(JSON.parse(req.postData())));
     if (req.url().includes("streamGenerateContent")) {
@@ -61,11 +68,11 @@ async function setupRoutes(ctx) {
       const third = Math.ceil(out.length / 3);
       const chunks = [0, 1, 2].map((i) => out.slice(i * third, (i + 1) * third));
       const body = chunks.map((c, i) => `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: c }] }, ...(i === 2 ? { finishReason: "STOP" } : {}) }] })}\n\n`).join("");
-      return route.fulfill({ contentType: "text/event-stream", body });
+      return fulfill(route, { contentType: "text/event-stream", body });
     }
-    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: out }] } }] }) });
+    return fulfill(route, { contentType: "application/json", body: JSON.stringify({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: out }] } }] }) });
   });
-  await ctx.route("https://world.openfoodfacts.org/**", (route) => route.fulfill({
+  await ctx.route("https://world.openfoodfacts.org/**", (route) => preflight(route) || fulfill(route, {
     contentType: "application/json",
     body: JSON.stringify({ status: 1, product: { product_name: "Süzme Yoğurt", brands: "Örnek", serving_quantity: 150, nutriments: { "energy-kcal_100g": 100, proteins_100g: 10, carbohydrates_100g: 4, fat_100g: 5, fiber_100g: 0, sugars_100g: 4 } } }),
   }));
@@ -265,11 +272,12 @@ try {
     const c = await browser.newContext({ ...mobile, acceptDownloads: true });
     await setupRoutes(c);
     await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      if (preflight(route)) return;
       const req = route.request();
-      if (req.method() === "GET") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-9-flash" }, { name: "models/gemini-9-flash-lite" }] }) });
+      if (req.method() === "GET") return fulfill(route, { contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-9-flash" }, { name: "models/gemini-9-flash-lite" }] }) });
       const body = JSON.parse(req.postData());
       if (!body.systemInstruction && req.url().includes("flash-latest") && !req.url().includes("lite"))
-        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "The model is overloaded." } }) });
+        return fulfill(route, { status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "The model is overloaded." } }) });
       return route.fallback();
     });
     await c.addInitScript(() => {
@@ -377,6 +385,7 @@ try {
     const calls = [];
     // Sonradan eklenen route önceliklidir; eşleşmeyen istekler genel taklide düşer
     await c.route("https://generativelanguage.googleapis.com/**", (route) => {
+      if (preflight(route)) return;
       const url = route.request().url();
       const body = JSON.parse(route.request().postData() || "{}");
       calls.push({ model: url.match(/models\/([^:]+)/)?.[1], strict: !!body.generationConfig?.responseSchema });
@@ -394,7 +403,7 @@ try {
     await c.close();
     return result;
   }
-  const fail = (status, message) => (route) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: { message } }) });
+  const fail = (status, message) => (route) => preflight(route) || fulfill(route, { status, contentType: "application/json", body: JSON.stringify({ error: { message } }) });
 
   let r = await analyzeWith((route, call) => (call.model.includes("lite") ? fail(503, "The model is overloaded.")(route) : null));
   ok(!r.error && r.calls.filter((c) => c.model.includes("lite")).length === 3 && r.calls.some((c) => !c.model.includes("lite")),
