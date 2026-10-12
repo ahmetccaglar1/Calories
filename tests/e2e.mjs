@@ -93,9 +93,16 @@ const errors = [];
 async function newPage(ctx) {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
+  if (ENGINE !== "chromium" || process.env.DEBUG) {
+    // Teşhis için: konsol hataları ve başarısız istekler
+    page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") console.log(`  [konsol ${m.type()}] ${m.text()}`); });
+    page.on("requestfailed", (r) => console.log(`  [istek başarısız] ${r.method()} ${r.url().slice(0, 100)} → ${r.failure()?.errorText}`));
+  }
   return page;
 }
-const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true };
+// Service worker'ın aracılık ettiği istekleri Playwright taklit edemiyor (WebKit buna sayfanın kendi API
+// isteklerini de dahil ediyor). Ağ taklidi yapılan bağlamlarda SW kapalı; SW ayrıca kendi testinde sınanıyor.
+const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: "block" };
 
 try {
   // ================= Yeni kullanıcı =================
@@ -345,7 +352,7 @@ try {
 
   // --- İkon dosyaları ---
   {
-    const c = await browser.newContext();
+    const c = await browser.newContext({ serviceWorkers: "block" });
     const p = await c.newPage();
     await p.goto(BASE);
     const touchIcon = await p.$eval("link[rel='apple-touch-icon']", (l) => l.href);
@@ -358,6 +365,23 @@ try {
       return r.ok() && b.slice(1, 4).toString() === "PNG" ? b.readUInt32BE(16) : 0;
     }));
     ok(results.every(Boolean) && results[0] === 180 && !touchIcon.includes("?"), `ana ekran ikonu ve manifest ikonları geçerli PNG (${results.join(", ")} px)`);
+    await c.close();
+  }
+
+  // --- Service worker: kaydoluyor ve uygulama dosyalarını önbelleğe alıyor ---
+  {
+    const c = await browser.newContext({ serviceWorkers: "allow" });
+    const p = await newPage(c);
+    await p.goto(BASE);
+    const sw = await p.evaluate(async () => {
+      const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 10000))]);
+      if (!reg) return null;
+      const keys = await caches.keys();
+      const cached = keys.length ? (await (await caches.open(keys[0])).keys()).map((r) => new URL(r.url).pathname) : [];
+      return { active: !!reg.active, cached };
+    });
+    ok(sw?.active && sw.cached.some((u) => u.endsWith("/app.js")) && sw.cached.some((u) => u.endsWith("/kalori-icon-180.png")),
+      `service worker etkin ve uygulama dosyalarını önbelleğe alıyor (${sw?.cached.length ?? 0} dosya)`);
     await c.close();
   }
 
