@@ -306,12 +306,20 @@ try {
 
     // --- Çevrimdışı fotoğraf → bekleyen ---
     await p.click(".tabbar [data-tab='today']");
-    await c.setOffline(true);
+    // Çevrimdışını uygulama düzeyinde taklit et: Playwright'ın ağ kesme emülasyonu WebKit'te yerel blob:
+    // görsellerini de engelliyor (gerçek Safari engellemez), bu yüzden onLine bayrağı + olaylar + API isteği kesme.
+    const setOnline = (on) => p.evaluate((v) => {
+      Object.defineProperty(navigator, "onLine", { configurable: true, get: () => v });
+      window.dispatchEvent(new Event(v ? "online" : "offline"));
+    }, on);
+    await p.route("https://generativelanguage.googleapis.com/**", (route) => route.abort());
+    await setOnline(false);
     await p.click("#addBtn");
     await p.setInputFiles("#galleryInput", PHOTO);
     await p.waitForSelector("#pendingGo");
     ok(await p.$eval("#pendingGo", (b) => b.disabled), "çevrimdışı çekilen fotoğraf bekleyenlere ekleniyor (buton pasif)");
-    await c.setOffline(false);
+    await p.unroute("https://generativelanguage.googleapis.com/**");
+    await setOnline(true);
     await p.waitForFunction(() => !document.getElementById("pendingGo").disabled);
     ok(true, "internet gelince bekleyen analiz etkinleşiyor");
     await shot(p, "11-pending");
